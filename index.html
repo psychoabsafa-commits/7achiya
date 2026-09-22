@@ -1,0 +1,2738 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>الحاشية — قارئ الكتب بالحاشية الذكية</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#161F2A">
+<meta name="description" content="قارئ PDF بحاشية سياقية ذكية: نطق المصطلحات، أصلها الاشتقاقي، ومعناها في سياقها.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="الحاشية">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --paper:#E9EBEC; --paper-warm:#F4F5F5;
+  --ink:#151E27; --ink-soft:#4A5763;
+  --slab:#161F2A; --lapis:#2E5FA3; --lapis-light:#6E9BD6; --rubric:#A8762C;
+  --rule:rgba(21,30,39,.14);
+  --serif:"Amiri",serif; --ui:"IBM Plex Sans Arabic",system-ui,sans-serif; --latin:"Newsreader",serif;
+  /* Type is derived from the screen instead of assumed. The base grows with
+     the viewport but is clamped at both ends, so a 320px phone gets readable
+     type without a 1400px desktop getting billboard type. The reader's dial
+     is a multiplier on top, not an absolute size — one preference that means
+     the same thing on every device. */
+  --size-base: clamp(1.02rem, 0.90rem + 1.05vw, 1.34rem);
+  /* line-height is a unitless ratio, and a ratio cannot be clamped against a
+     vw length — the whole expression would be invalid and the declaration
+     dropped. Breakpoints carry it instead: tighter lines on a narrow column,
+     airier ones when there is room. */
+  --lead-base: 2.05;
+  --scale: 1;
+  --leading: 1;
+  --size: calc(var(--size-base) * var(--scale));
+  --lead: calc(var(--lead-base) * var(--leading));
+
+  /* Line length in characters, the measure that actually governs legibility:
+     roughly 45 on a narrow phone up to 72 on a wide screen. */
+  --measure: min(94vw, 44rem);
+
+  /* measured at runtime, never assumed */
+  --bar-h: 3.1rem;
+  --vh: 100vh;
+}
+@supports (height: 100dvh){
+  :root{ --vh: 100dvh; }   /* Chrome on Android changes vh when the address bar slides away */
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{background:var(--paper);color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+button,input,select{font-family:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--lapis);outline-offset:2px}
+
+/* bar */
+.bar{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;
+  padding:.55rem 1rem;background:rgba(233,235,236,.93);backdrop-filter:blur(8px);border-bottom:1px solid var(--rule)}
+.brand{display:flex;align-items:baseline;gap:.45rem;cursor:pointer}
+.brand b{font-family:var(--serif);font-size:1.4rem;font-weight:700}
+.brand span{font-size:.7rem;color:var(--ink-soft)}
+.doctitle{font-size:.82rem;color:var(--ink-soft);max-width:20rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  border-inline-start:1px solid var(--rule);padding-inline-start:.75rem;margin-inline-end:auto}
+.btn{border:1px solid var(--rule);background:transparent;padding:.32rem .75rem;border-radius:2px;font-size:.78rem;cursor:pointer;transition:.15s}
+.btn:hover{background:rgba(46,95,163,.09);border-color:var(--lapis)}
+.btn.primary{background:var(--slab);color:#EDEFF1;border-color:var(--slab)}
+.btn.primary:hover{background:var(--lapis);border-color:var(--lapis)}
+.btn:disabled{opacity:.4;cursor:default}
+.dial{display:flex;align-items:center;gap:.28rem;font-size:.7rem;color:var(--ink-soft)}
+.dial button{width:1.5rem;height:1.5rem;border:1px solid var(--rule);background:transparent;border-radius:2px;cursor:pointer;line-height:1}
+.dial button:hover{background:rgba(46,95,163,.09)}
+.find{display:flex;align-items:center;gap:.3rem}
+.find input{border:1px solid var(--rule);background:var(--paper-warm);padding:.3rem .55rem;border-radius:2px;font-size:.78rem;width:9rem}
+.hits{font-size:.7rem;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+
+/* layout */
+.wrap{display:grid;grid-template-columns:14rem minmax(0,1fr) 25rem;align-items:start;min-height:calc(var(--vh) - var(--bar-h))}
+.wrap.no-toc{grid-template-columns:minmax(0,1fr) 25rem}
+.toc{position:sticky;top:var(--bar-h);height:calc(var(--vh) - var(--bar-h));overflow-y:auto;padding:1.2rem .9rem 3rem;
+  border-inline-end:1px solid var(--rule);font-size:.8rem}
+.toc h4{margin:0 0 .8rem;font-size:.68rem;letter-spacing:.08em;color:var(--ink-soft);font-weight:600}
+.toc a{display:block;padding:.32rem .3rem;color:var(--ink-soft);text-decoration:none;line-height:1.6;border-radius:2px;cursor:pointer}
+.toc a:hover{background:rgba(46,95,163,.1);color:var(--ink)}
+.toc a.lvl2{padding-inline-start:1rem;font-size:.75rem;opacity:.85}
+
+.page{padding:3rem 2rem 8rem;display:flex;justify-content:center}
+.sheet{width:100%;max-width:var(--measure)}
+.reader{font-family:var(--serif);font-size:var(--size);line-height:var(--lead);text-align:justify;hyphens:auto}
+.reader p{margin:0 0 1.3em}
+.reader p[dir="ltr"]{text-align:left;direction:ltr}
+.toc a[dir="ltr"]{text-align:left;direction:ltr}
+.toc a[dir="rtl"]{text-align:right;direction:rtl}
+.reader p[dir="rtl"]{text-align:right;direction:rtl}
+/* an unbuilt page holds roughly a page of space so the scrollbar stays honest and the observer does not fire for the whole book at once */
+.pgsec:not([data-filled]){min-height:62vh}
+.pagemark{display:flex;align-items:center;gap:.7rem;margin:2.4rem 0 1.6rem;color:#93A0AB;font-family:var(--ui);font-size:.66rem;letter-spacing:.06em}
+.pagemark::before,.pagemark::after{content:"";flex:1;height:1px;background:var(--rule)}
+.scanned{border:1px dashed var(--rule);padding:1rem;text-align:center;font-family:var(--ui);font-size:.8rem;color:var(--ink-soft);margin-bottom:1.3em}
+.scanned button{margin-top:.6rem}
+.err a{color:inherit;font-weight:600}
+.voice-row{display:flex;gap:.6rem;align-items:center;margin-top:.5rem}
+.voice-row select{flex:1}
+.syl{font-family:var(--ui);font-size:.72rem;color:var(--ink-soft);letter-spacing:.04em}
+.sum{font-size:.84rem;line-height:1.8}
+.sum-head{font-size:.68rem;opacity:.75;margin-bottom:.6rem;display:flex;gap:.4rem;
+  align-items:center;flex-wrap:wrap}
+.verdict{border-radius:99px;padding:.05rem .5rem;font-size:.64rem;white-space:nowrap}
+.verdict.good{background:rgba(110,200,140,.18);color:#9BE0B4}
+.verdict.warn{background:rgba(200,150,60,.22);color:#E8C48A}
+.thesis{font-family:var(--serif);font-size:1rem;line-height:1.9;margin:.5rem 0 .9rem;
+  padding-inline-start:.7rem;border-inline-start:2px solid var(--lapis-light)}
+.pts{margin:0;padding-inline-start:1.2rem}
+.pts li{margin:.55rem 0}
+.pts .claim{font-family:var(--serif);font-size:.95rem;line-height:1.85}
+.pts blockquote{margin:.25rem 0 0;padding-inline-start:.6rem;font-size:.74rem;opacity:.72;
+  border-inline-start:1px dashed rgba(255,255,255,.28);font-style:italic}
+.pts li.noproof .claim{opacity:.85}
+.pts li.noproof blockquote{border-inline-start-color:var(--rubric);opacity:.6}
+.tag{background:var(--rubric);color:#fff;border-radius:3px;padding:.02rem .34rem;
+  font-family:var(--ui);font-size:.6rem;font-style:normal;vertical-align:.1em}
+.sub{margin-top:1rem;font-size:.7rem;opacity:.7;letter-spacing:.04em}
+.pop{position:absolute;z-index:88;max-width:min(92vw,23rem);width:max-content;
+  background:var(--slab);color:#DCE3EA;border-radius:8px;padding:.85rem .95rem;
+  box-shadow:0 10px 34px rgba(0,0,0,.34);font-family:var(--ui);font-size:.82rem;line-height:1.7}
+.pop .pop-head{display:flex;align-items:baseline;gap:.5rem;margin-bottom:.35rem}
+.pop .pop-term{font-family:var(--latin);font-size:1.15rem;font-weight:600;flex:1}
+.pop .pop-term.ar{font-family:var(--serif)}
+.pop-kept{font-size:.6rem;opacity:.7;border:1px solid rgba(255,255,255,.28);
+  border-radius:99px;padding:.05rem .4rem;white-space:nowrap}
+.pop .pop-x{background:transparent;border:0;color:inherit;font-size:1.2rem;
+  line-height:1;cursor:pointer;opacity:.6;padding:0 .2rem}
+.pop .pop-x:hover{opacity:1}
+.pop .row{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;margin:.3rem 0}
+.pop .body-ar{font-family:var(--serif);font-size:.95rem;line-height:1.85;margin:.45rem 0}
+.pop .meta{font-size:.72rem;opacity:.82;margin-top:.25rem}
+.pop .eq{color:var(--lapis-light);font-size:.9rem}
+.pop .chips{display:flex;gap:.4rem;align-items:center;margin-top:.55rem;flex-wrap:wrap}
+.pop::after{content:"";position:absolute;inset-block-start:-6px;inset-inline-start:calc(50% - 6px);
+  border:6px solid transparent;border-block-start:0;border-block-end-color:var(--slab)}
+.pop.above::after{inset-block-start:auto;inset-block-end:-6px;
+  border-block-end:0;border-block-start-color:var(--slab)}
+.keep.urgent{background:var(--rubric,#A8762C);color:#fff;border-color:var(--rubric,#A8762C)}
+.btn.install{background:var(--rubric,#A8762C);color:#fff;border-color:var(--rubric,#A8762C);font-weight:600}
+.bar .btn i{font-style:normal;margin-inline-end:.3rem}
+.bar .btn:has(.lbl:empty) i{margin-inline-end:0}
+.doubt{background:rgba(168,118,44,.16);border-bottom:1px dashed var(--rubric,#A8762C);cursor:help}
+.banner.warn{background:#FBF3E4;color:#7A4A18;border-bottom-color:#E4CDA2}
+.ocr-issues{margin:.4rem 0 0;padding-inline-start:1.1rem;font-size:.78rem}
+.ocr-issues li{margin:.15rem 0}
+.build{margin-top:1rem;padding-top:.7rem;border-top:1px dashed var(--rule);opacity:.75}
+.stamp{position:fixed;bottom:.5rem;left:.6rem;z-index:95;font-family:var(--ui);font-size:.62rem;
+  white-space:nowrap;
+  color:var(--ink-soft);background:rgba(255,255,255,.8);border:1px solid var(--rule);
+  border-radius:99px;padding:.1rem .5rem;pointer-events:none;opacity:.65}
+.say.slow{opacity:.8}
+.selbar{position:absolute;z-index:90;display:flex;gap:.25rem;padding:.25rem;
+  background:var(--ink,#161F2A);border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,.28)}
+.selbar button{font-family:var(--ui);font-size:.72rem;color:#fff;background:transparent;
+  border:0;padding:.3rem .55rem;border-radius:3px;cursor:pointer;white-space:nowrap}
+.selbar button:hover{background:rgba(255,255,255,.16)}
+.selbar-n{color:rgba(255,255,255,.55);font-family:var(--ui);font-size:.62rem;
+  padding:0 .45rem;align-self:center;white-space:nowrap}
+.keystate{margin-top:.2rem}
+.keystate b{color:var(--ink)}
+.keystate.warn{color:#9A5B2B}
+.modal-actions .ghost{margin-inline-end:auto;opacity:.75}
+.tok{cursor:pointer;border-radius:2px;unicode-bidi:isolate;transition:background .12s}
+.tok:hover{background:rgba(46,95,163,.14)}
+.tok.latin{font-family:var(--latin);font-size:.94em}
+.tok.flagged{box-shadow:inset 0 -.42em 0 rgba(168,118,44,.17)}
+.tok.active{background:rgba(46,95,163,.16);box-shadow:inset 0 -2px 0 var(--lapis)}
+.tok.hit{background:rgba(168,118,44,.35)}
+.marker{font-family:var(--ui);font-size:.62em;color:var(--lapis);vertical-align:super;margin-inline-start:.12em;font-weight:600}
+
+/* intro / library */
+.intro{max-width:var(--measure)}
+.intro h1{font-family:var(--serif);font-size:2.05rem;font-weight:700;margin:0 0 .5rem;line-height:1.4}
+.intro p.lede{color:var(--ink-soft);font-size:.92rem;line-height:1.9;margin:0 0 1.8rem;max-width:32rem}
+.drop{border:1.5px dashed rgba(21,30,39,.28);border-radius:3px;padding:2.6rem 1.5rem;text-align:center;
+  background:var(--paper-warm);transition:.18s;cursor:pointer}
+.drop.over{border-color:var(--lapis);background:rgba(46,95,163,.07)}
+.drop b{display:block;font-family:var(--serif);font-size:1.3rem;margin-bottom:.35rem}
+.drop span{font-size:.8rem;color:var(--ink-soft)}
+.shelf{margin-top:2.4rem}
+.shelf h4{font-size:.68rem;letter-spacing:.08em;color:var(--ink-soft);margin:0 0 .7rem;font-weight:600}
+.book{display:flex;align-items:center;gap:.8rem;padding:.7rem .2rem;border-top:1px solid var(--rule);cursor:pointer}
+.book:hover .bt{color:var(--lapis)}
+.bt{font-family:var(--serif);font-size:1.02rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bmeta{font-size:.7rem;color:#93A0AB;font-variant-numeric:tabular-nums}
+.book .x{background:none;border:none;color:#B4BEC6;cursor:pointer;font-size:1rem}
+.book .x:hover{color:#B4534F}
+.progbar{height:2px;background:rgba(21,30,39,.1);margin-top:1.4rem;overflow:hidden}
+.progbar i{display:block;height:100%;background:var(--lapis);width:0;transition:width .25s}
+.progtext{font-size:.75rem;color:var(--ink-soft);margin-top:.55rem}
+
+/* margin slab */
+.margin{position:sticky;top:var(--bar-h);height:calc(var(--vh) - var(--bar-h));background:var(--slab);color:#DCE3EA;
+  display:flex;flex-direction:column;border-inline-start:1px solid rgba(255,255,255,.07)}
+.margin-head{padding:.8rem 1.15rem;border-bottom:1px solid rgba(255,255,255,.09);display:flex;align-items:center;gap:.5rem}
+.tabs{display:flex;gap:.3rem}
+.tab{background:transparent;border:1px solid rgba(255,255,255,.14);color:#9FB0C0;font-size:.67rem;padding:.2rem .55rem;border-radius:2px;cursor:pointer}
+.tab[aria-selected="true"]{background:rgba(110,155,214,.18);color:#DCE3EA;border-color:var(--lapis-light)}
+.margin-head small{color:#7E8FA0;font-size:.67rem;margin-inline-start:auto}
+.margin-body{flex:1;overflow-y:auto;padding:1rem 1.15rem 3rem}
+.margin-body::-webkit-scrollbar{width:6px}
+.margin-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16)}
+.empty{color:#71828F;font-size:.82rem;line-height:1.95;padding-top:1.4rem}
+.empty b{display:block;color:#9FB0C0;font-family:var(--serif);font-size:1rem;margin-bottom:.4rem}
+.gloss{border-top:1px solid rgba(255,255,255,.1);padding:1rem 0 .3rem;position:relative}
+.gloss:first-child{border-top:none;padding-top:.2rem}
+.gloss-idx{position:absolute;inset-inline-end:0;top:1rem;font-size:.66rem;color:#66788A;font-variant-numeric:tabular-nums}
+.term{font-family:var(--latin);font-size:1.3rem;line-height:1.3;color:#F2F5F8;display:block;margin-bottom:.15rem;unicode-bidi:isolate}
+.term.ar{font-family:var(--serif);font-size:1.35rem}
+.ipa{font-family:var(--latin);color:var(--rubric);font-size:.9rem;unicode-bidi:isolate;direction:ltr;display:inline-block}
+.translit{color:#C9B896;font-family:var(--serif);font-size:1.05rem}
+.row{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin:.3rem 0 .7rem}
+.say{background:rgba(168,118,44,.16);border:1px solid rgba(168,118,44,.4);color:#E0C48A;border-radius:2px;padding:.15rem .5rem;font-size:.7rem;cursor:pointer}
+.say:hover{background:rgba(168,118,44,.3)}
+.eq{font-family:var(--serif);font-size:1.05rem;color:#BFD2E6;padding:.3rem 0;border-inline-start:2px solid var(--lapis);padding-inline-start:.65rem;margin-bottom:.7rem}
+.body-ar{font-family:var(--serif);font-size:1.02rem;line-height:1.95;color:#CBD5DE}
+.meta{margin-top:.65rem;font-size:.76rem;line-height:1.8;color:#8A9BAB}
+.meta i{color:#66788A;font-style:normal}
+.chips{display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap}
+.chip{font-size:.66rem;padding:.18rem .5rem;border-radius:2px;background:rgba(255,255,255,.06);color:#9FB0C0}
+.keep{background:transparent;border:1px solid rgba(255,255,255,.18);color:#9FB0C0;font-size:.68rem;padding:.2rem .55rem;border-radius:2px;cursor:pointer}
+.keep:hover{border-color:var(--lapis-light);color:#DCE3EA}
+.keep.on{background:rgba(46,95,163,.28);color:#D7E4F3;border-color:var(--lapis)}
+.pending{display:flex;align-items:center;gap:.45rem;color:#8A9BAB;font-size:.8rem;padding:.9rem 0}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--lapis-light);animation:pulse 1.1s infinite}
+.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+.err{color:#D99A9A;font-size:.78rem;line-height:1.8;padding:.8rem 0}
+.lex{border-top:1px solid rgba(255,255,255,.1);padding:.7rem 0;font-size:.84rem}
+.lex:first-child{border-top:none}
+.lex b{font-family:var(--latin);color:#E7EDF3;font-weight:500}
+.lex b.ar{font-family:var(--serif)}
+.lex p{margin:.2rem 0 0;color:#8A9BAB;font-size:.76rem;line-height:1.7}
+.lex .x{float:left;background:none;border:none;color:#66788A;cursor:pointer;font-size:.9rem}
+.lex .x:hover{color:#D99A9A}
+.summary{font-family:var(--serif);font-size:1rem;line-height:1.95;color:#CBD5DE;white-space:pre-wrap}
+
+/* The HTML hides things with the `hidden` attribute, and the browser's own
+   rule for that is [hidden]{display:none} — specificity (0,1,0). Any author
+   rule of equal specificity, such as .modal{display:flex}, beats it, because
+   author styles outrank the user agent's. Three elements were declared with
+   display and so could never be hidden at all: the settings dialog sat over
+   the whole page permanently, swallowing every click. This rule settles it
+   for every element, present and future. */
+[hidden]{display:none !important}
+.banner{padding:.75rem 1rem;font-family:var(--ui);font-size:.82rem;line-height:1.6;
+  background:#FBF0E4;color:#7A4A18;border-bottom:1px solid #E4C9A5;position:relative;z-index:90}
+.banner.bad{background:#FBE9E9;color:#8B2020;border-bottom-color:#E7B4B4}
+.banner code{font-family:ui-monospace,monospace;background:rgba(0,0,0,.06);padding:.05em .3em;border-radius:2px}
+.banner a{color:inherit;font-weight:700}
+.banner .bx{float:inline-end;margin-inline-start:1rem;background:transparent;border:0;
+  font-size:1.1rem;line-height:1;cursor:pointer;color:inherit;opacity:.6}
+.banner .bx:hover{opacity:1}
+.banner.off{background:#EEF1F4;color:#3C4C5C;border-bottom-color:#D3DBE2}
+.btn.on{background:var(--lapis,#2E5FA3);color:#fff;border-color:var(--lapis,#2E5FA3)}
+
+/* modal */
+.modal{position:fixed;inset:0;z-index:80;background:rgba(21,30,39,.55);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:1.2rem}
+.card{background:var(--paper-warm);border-radius:3px;max-width:26rem;width:100%;padding:1.6rem;border:1px solid var(--rule)}
+.card h3{font-family:var(--serif);font-size:1.45rem;margin:0 0 .6rem;font-weight:700}
+.card label{display:block;font-size:.72rem;color:var(--ink-soft);margin:.9rem 0 .3rem;letter-spacing:.03em}
+.card input,.card select{width:100%;padding:.5rem .6rem;border:1px solid var(--rule);background:#fff;border-radius:2px;font-size:.85rem}
+.hint{font-size:.76rem;line-height:1.85;color:var(--ink-soft);margin:.2rem 0 0}
+.modal-actions{display:flex;gap:.6rem;justify-content:flex-start;margin-top:1.4rem}
+
+/* ==========================================================================
+   The book gets the page.
+   Two standing columns used to eat 39rem of every screen whether they were
+   wanted or not. Both are now drawers that slide in when asked and leave
+   again, and the reading column runs the full width beneath them.
+   ========================================================================== */
+.wrap, .wrap.no-toc{grid-template-columns:minmax(0,1fr)}
+
+.toc{position:fixed;inset:var(--bar-h) auto 0 0;width:min(86vw,19rem);
+  height:calc(var(--vh) - var(--bar-h));z-index:75;background:var(--paper-warm);
+  transform:translateX(-102%);transition:transform .22s ease;
+  box-shadow:2px 0 18px rgba(0,0,0,.18);overflow-y:auto}
+html[dir="rtl"] .toc{inset:var(--bar-h) 0 0 auto;transform:translateX(102%);
+  box-shadow:-2px 0 18px rgba(0,0,0,.18)}
+/* The closed state is written with html[dir="rtl"] in front of it, which makes
+   it more specific than a bare .toc.open. The open rule must carry the same
+   prefix or the drawer never slides in: the class is added, the movement is
+   overruled, and all you see is the backdrop. */
+.toc.open, html[dir="rtl"] .toc.open{transform:translateX(0)}
+
+.margin{position:fixed;inset:var(--bar-h) 0 0 auto;width:min(92vw,25rem);
+  height:calc(var(--vh) - var(--bar-h));z-index:76;
+  transform:translateX(102%);transition:transform .22s ease;
+  box-shadow:-2px 0 22px rgba(0,0,0,.24)}
+html[dir="rtl"] .margin{inset:var(--bar-h) auto 0 0;transform:translateX(-102%);
+  box-shadow:2px 0 22px rgba(0,0,0,.24)}
+.margin.open, html[dir="rtl"] .margin.open{transform:translateX(0)}
+
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:74}
+.only-phone{display:none}
+
+/* ============================================================
+   PHONE
+   The three-column desktop layout cannot survive a 360px screen.
+   The margin becomes a bottom sheet that rests almost closed and
+   opens on a tap, the index becomes a drawer, and the toolbar
+   scrolls sideways instead of piling into four rows.
+   ============================================================ */
+@media (max-width:900px){
+  :root{--lead-base:1.85}
+  .only-phone{display:inline-flex}
+
+  .wrap,.wrap.no-toc{grid-template-columns:1fr}
+
+  /* toolbar: one row that scrolls, with thumb-sized targets */
+  .bar{gap:.4rem;padding:.4rem .6rem;flex-wrap:nowrap;overflow-x:auto;
+       scrollbar-width:none;-webkit-overflow-scrolling:touch;
+       padding-top:calc(.4rem + env(safe-area-inset-top))}
+  .bar::-webkit-scrollbar{display:none}
+  .bar .btn,.bar button{min-height:2.6rem;flex:0 0 auto}
+  /* icons only: eight labelled buttons cannot fit 360px, eight icons can */
+  .bar .btn .lbl{display:none}
+  .bar .btn i{margin-inline-end:0;font-size:1.05rem}
+  .bar .btn{padding-inline:.6rem}
+  .dial button{min-width:2.4rem;min-height:2.4rem}
+  .doctitle{max-width:7rem;flex:0 0 auto}
+  .find{flex:0 0 auto} .find input{width:8rem}
+
+  .toc{width:min(84vw,20rem)}
+  /* reading column clears the resting sheet */
+  .page{padding:1.2rem clamp(.6rem, 3.2vw, 1.2rem) calc(6rem + env(safe-area-inset-bottom))}
+
+  /* the margin panel: a sheet that rests nearly closed */
+  .margin, html[dir="rtl"] .margin{position:fixed;inset:auto 0 0 0;top:auto;width:auto;
+          transform:translateY(calc(var(--sheet-h) - 3.4rem));
+          height:clamp(14rem, 52%, 26rem);height:clamp(14rem, 52 * var(--vh) / 100, 26rem);
+          border-radius:14px 14px 0 0;z-index:76;
+          border-top:1px solid rgba(255,255,255,.12);
+          --sheet-h:clamp(14rem, 52 * var(--vh) / 100, 26rem);
+          transform:translateY(calc(var(--sheet-h) - 3.4rem));
+          transition:transform .24s ease;
+          padding-bottom:env(safe-area-inset-bottom);
+          box-shadow:0 -6px 22px rgba(0,0,0,.28)}
+  .margin.open, html[dir="rtl"] .margin.open{transform:translateY(0)}
+  .sheet-x{position:absolute;top:.35rem;inset-inline-end:.5rem;z-index:2;
+    background:transparent;border:0;color:#DCE3EA;font-size:1.5rem;line-height:1;
+    padding:.2rem .5rem;cursor:pointer;opacity:.7}
+  .grip{display:block;width:100%;background:transparent;border:0;padding:.55rem 0 .3rem;cursor:pointer}
+  .grip::before{content:"";display:block;width:2.6rem;height:.28rem;margin:0 auto;
+                border-radius:99px;background:rgba(255,255,255,.42)}
+  .margin-head{padding-top:.2rem}
+  .tab{min-height:2.3rem}
+
+  /* touch targets and comfortable reading */
+  .tok{padding:.06em .04em}
+  .selbar button{padding:.55rem .8rem;font-size:.8rem}
+  .stamp{bottom:calc(3.9rem + env(safe-area-inset-bottom));opacity:.45}
+  .fab{position:fixed;z-index:78;inset-block-end:calc(4.2rem + env(safe-area-inset-bottom));
+    inset-inline-start:.9rem;width:3.1rem;height:3.1rem;border-radius:50%;
+    border:0;background:var(--slab,#161F2A);color:#fff;font-size:1.2rem;
+    box-shadow:0 4px 14px rgba(0,0,0,.3);cursor:pointer}
+  .fab.armed{background:var(--lapis,#2E5FA3)}
+  .fab:active{transform:scale(.94)}
+  .card{max-height:86vh;overflow-y:auto}
+  .banner{font-size:.8rem}
+}
+
+@media (max-width:420px){
+  :root{--lead-base:1.76}
+  .brand small{display:none}
+  .doctitle{max-width:5rem}
+  .find input{width:6.5rem}
+  /* justified text on a narrow column tears rivers of white through the page */
+  .reader{text-align:start}
+}
+
+/* ------------------------------------------------------------------
+   PHONE, LYING DOWN
+   A bottom sheet on a 360px-tall screen leaves nothing to read. It
+   becomes a side panel instead, and the page keeps its measure.
+   ------------------------------------------------------------------ */
+@media (max-width:900px) and (orientation:landscape) and (max-height:540px){
+  .margin{inset:0 0 0 auto;top:0;height:var(--vh);width:min(58vw,26rem);
+          border-radius:14px 0 0 14px;--sheet-h:0px;
+          transform:translateX(102%)}
+  html[dir="rtl"] .margin{inset:0 auto 0 0;border-radius:0 14px 14px 0;transform:translateX(-102%)}
+  .margin.open, html[dir="rtl"] .margin.open{transform:translateX(0)}
+  .grip{position:absolute;inset-block-start:50%;inset-inline-start:0;width:1.5rem;padding:0}
+  .grip::before{width:.28rem;height:2.6rem}
+  .page{padding-bottom:2.5rem}
+  .fab{inset-block-end:.8rem}
+  .stamp{bottom:.4rem}
+  :root{--lead-base:1.58}
+}
+
+/* ------------------------------------------------------------------
+   TABLET AND FOLDABLE, 600–900px
+   Wide enough for a real reading column; the sheet need not be tall.
+   ------------------------------------------------------------------ */
+@media (min-width:600px) and (max-width:900px) and (orientation:portrait){
+  :root{--lead-base:1.95}
+  .margin{--sheet-h:clamp(14rem, 42 * var(--vh) / 100, 24rem);
+          height:clamp(14rem, 42 * var(--vh) / 100, 24rem)}
+  .page{padding-inline:clamp(1rem,5vw,3rem)}
+  .toc{width:min(52vw,22rem)}
+}
+
+/* the grip only exists on phones */
+.grip{display:none}
+.sheet-x{display:none}
+.fab{display:none}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand" id="home"><b>الحاشية</b><span>قارئ</span></div>
+  <div class="doctitle" id="docTitle" hidden></div>
+  <div class="find" id="findBox" hidden>
+    <input id="findInput" placeholder="ابحث في الكتاب" />
+    <span class="hits" id="hits"></span>
+  </div>
+  <div class="dial" id="dial" hidden>
+    <button id="fMinus" aria-label="تصغير">−</button><span>الخط</span><button id="fPlus" aria-label="تكبير">+</button>
+    <button id="lMinus" aria-label="تقليل التباعد">−</button><span>التباعد</span><button id="lPlus" aria-label="زيادة التباعد">+</button>
+  </div>
+  <button class="btn" id="tocBtn" hidden aria-label="الفهرس" title="الفهرس"><i>☰</i><span class="lbl">الفهرس</span></button>
+  <button class="btn" id="marginBtn" hidden aria-label="المعجم والخلاصة" title="المعجم والخلاصة"><i>📚</i><span class="lbl">المعجم</span></button>
+  <button class="btn" id="speakBtn" hidden aria-pressed="false" title="النطق"><i>🔊</i><span class="lbl">النطق</span></button>
+  <button class="btn" id="glossBtn" hidden aria-pressed="true" title="الحاشية"><i>📖</i><span class="lbl">الحاشية</span></button>
+  <button class="btn" id="sumBtn" hidden title="خلاصة المقطع"><i>✦</i><span class="lbl">خلاصة المقطع</span></button>
+  <button class="btn" id="flagBtn" hidden title="ترشيح المصطلحات"><i>⚑</i><span class="lbl">ترشيح المصطلحات</span></button>
+  <button class="btn install" id="installBtn" hidden title="تثبيت التطبيق على الجهاز"><i>⤓</i><span class="lbl">ثبّت التطبيق</span></button>
+  <button class="btn primary" id="openBtn" title="فتح ملف"><i>📂</i><span class="lbl">فتح ملف من الجهاز</span></button>
+  <button class="btn" id="setBtn" aria-label="الإعدادات">⚙︎</button>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="card">
+    <h3>إعدادات الحاشية</h3>
+    <p class="hint">الحواشي والخلاصات وقراءة الصفحات الممسوحة تمرّ عبر واجهة Anthropic البرمجية، فتحتاج مفتاحاً خاصاً بك. يُحفظ المفتاح في هذا الجهاز وحده ولا يُرسل إلى أي جهة أخرى.</p>
+    <label>المزوّد</label>
+    <select id="provInput">
+      <option value="anthropic">Anthropic — Claude</option>
+      <option value="gemini">Google — Gemini (فئة مجانية)</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="openrouter">OpenRouter — نماذج كثيرة بمفتاح واحد</option>
+    </select>
+    <p class="hint" id="provNote"></p>
+
+    <label>مفتاح الواجهة (API key)</label>
+    <input id="keyInput" type="password" placeholder="…" autocomplete="off">
+
+    <label>النموذج</label>
+    <input id="modelInput" list="modelList" placeholder="اسم النموذج" autocomplete="off">
+    <datalist id="modelList"></datalist>
+    <label>لسان النصوص اللاتينية</label>
+    <select id="latinInput">
+      <option value="auto">تلقائي — يُستنتج من الفقرة</option>
+      <option value="en-GB">إنجليزي بريطاني دائماً</option>
+      <option value="fr-FR">فرنسي دائماً</option>
+    </select>
+    <label>صوت النطق</label>
+    <select id="voiceInput"></select>
+    <div class="voice-row">
+      <select id="rateInput" aria-label="سرعة النطق">
+        <option value="0.7">بطيء</option>
+        <option value="0.85">معتدل</option>
+        <option value="1">طبيعي</option>
+      </select>
+      <button class="btn" id="voiceTest" type="button">◂ جرّب</button>
+    </div>
+    <p class="hint keystate" id="voiceNote"></p>
+
+    <p class="hint">تُستخرج نصوص الـ PDF داخل جهازك دون اتصال بالشبكة؛ الاتصال يقع فقط حين تطلب حاشية أو خلاصة.</p>
+    <p class="hint keystate" id="keyState"></p>
+    <p class="hint build">نسخة التطبيق: <b id="buildTag">٣٣</b> — إن كان الرقم أقلّ من ٨ فالمتصفح يعرض نسخة قديمة محفوظة؛ اضغط <b>Ctrl+Shift+R</b>.</p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="keyForget" hidden>انسَ المفتاح</button>
+      <button class="btn" id="modalClose">إغلاق</button>
+      <button class="btn primary" id="modalSave">احفظ</button>
+    </div>
+  </div>
+</div>
+
+<button class="fab only-phone" id="fab" hidden aria-label="انطق النص المظلّل">🔊</button>
+
+<div class="stamp" id="stamp" title="نسخة التطبيق">١٦</div>
+
+<div class="wrap" id="wrap">
+  <nav class="toc" id="toc" hidden><h4>الفهرس</h4><div id="tocList"></div></nav>
+
+  <main class="page">
+    <div class="sheet">
+      <section class="intro" id="intro">
+        <h1>افتح كتابك، ثم انقر ما استعصى عليك.</h1>
+        <p class="lede">أفلت ملف PDF هنا فيُستخرج نصه ويُعاد تنضيده للقراءة المتصلة. كل كلمة تنقرها تُكتب حاشيتها في الهامش: نطقها، أصلها الاشتقاقي، ومعناها في هذه الفقرة بالذات. الصفحات الممسوحة ضوئياً تُقرأ بصرياً عند الطلب.</p>
+        <div class="drop" id="drop">
+          <b>أفلت ملف PDF</b>
+          <span>أو انقر للاختيار — يُعالَج داخل متصفحك، ولا يُرفع الملف إلى أي خادم</span>
+          <input type="file" id="file" accept="application/pdf,.pdf,text/plain,.txt" hidden>
+        </div>
+        <div style="display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap">
+          <button class="btn primary" id="pickBtn">📂 اختر ملف PDF من الجهاز</button>
+        </div>
+        <div class="progbar" id="progbar" hidden><i id="progfill"></i></div>
+        <div class="progtext" id="progtext"></div>
+        <div class="shelf" id="shelf" hidden><h4>على الرف</h4><div id="shelfList"></div></div>
+      </section>
+      <article class="reader" id="reader" hidden></article>
+    </div>
+  </main>
+
+  <aside class="margin">
+    <button class="grip" id="grip" aria-label="طيّ اللوحة أو بسطها"></button>
+  <button class="sheet-x only-phone" id="sheetX" aria-label="إغلاق اللوحة">×</button>
+  <div class="margin-head">
+      <div class="tabs">
+        <button class="tab" id="tabGloss" aria-selected="true">الحاشية</button>
+        <button class="tab" id="tabLex" aria-selected="false">المعجم</button>
+        <button class="tab" id="tabSum" aria-selected="false">الخلاصة</button>
+      </div>
+      <small id="counter"></small>
+      <button class="keep" id="exportBtn" hidden>تصدير</button>
+    </div>
+    <div class="margin-body" id="marginBody"></div>
+  </aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const AR = n => String(n).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[d]);
+const isLatin = s => /[A-Za-zÀ-ÿ]/.test(s);
+/* Which direction a paragraph is written in. The first strong character
+   decides, exactly as dir="auto" would: a paragraph that opens in Arabic is
+   an Arabic paragraph even when it quotes a long English term inside it.
+   Counting letters instead got that backwards. The override only fires when
+   the other script overwhelms the first one — a stray leading word. */
+/* ============ which tongue is this? ============
+   Latin script is not a language. Every spoken feature here assumed that
+   anything in Latin letters was English, so a French passage was pronounced
+   with an English voice — "société" read as though it were English. A single
+   word is often ambiguous (nation, important, culture belong to both), so the
+   paragraph around it is what actually settles the question. */
+const FR_MARKS = /[àâäçéèêëîïôöùûüÿœæ]/i;
+const FR_WORDS = new Set(('le la les des du de un une dans pour qui que quoi est sont ete etre '
+ + 'avec sur plus cette ces leur leurs nous vous ils elles mais donc ni car ainsi cependant '
+ + 'toutefois aussi tres bien tout tous toute entre chez selon afin lorsque parce meme autre '
+ + 'autres notion sujet recherche travail monde vie temps sans deux comme apres').split(/\s+/));
+const EN_WORDS = new Set(('the of and to in that is are was were be been being with on for as '
+ + 'by from this these those which who whom whose but so than then there their them they has '
+ + 'have had not its it he she we you our your more most such about into through between '
+ + 'within however therefore thus also very well all each other others research').split(/\s+/));
+
+function detectLatin(text){
+  const t = String(text || '');
+  if (!t) return 'en-GB';
+  let fr = 0, en = 0;
+  const marks = t.match(/[àâäçéèêëîïôöùûüÿœæ]/gi);
+  if (marks) fr += marks.length * 2;          // é, ç, à are decisive evidence
+  t.toLowerCase().split(/[^a-zà-ÿœæ']+/).forEach(w => {
+    if (!w) return;
+    if (FR_WORDS.has(w)) fr++;
+    if (EN_WORDS.has(w)) en++;
+  });
+  return fr > en ? 'fr-FR' : 'en-GB';
+}
+
+/* the tongue to speak a fragment in, judged from its paragraph when there is one */
+function langFor(text, node){
+  if (!isLatin(text)) return 'ar-SA';
+  if (CFG.latin && CFG.latin !== 'auto') return CFG.latin;
+  let around = '';
+  try {
+    const p = node && node.closest ? node.closest('p') : null;
+    around = cleanText(p);
+  } catch(e){}
+  return detectLatin((around && around.length > 40) ? around : text);
+}
+
+/* the word itself, never the marker that may have been pinned to it */
+const tokWord = el => (el && el.dataset && el.dataset.w) || (el ? el.textContent : '');
+
+/* a paragraph's text with the gloss markers taken back out */
+function cleanText(node){
+  if (!node) return '';
+  const c = node.cloneNode(true);
+  if (c.querySelectorAll) c.querySelectorAll('.marker').forEach(m => m.remove());
+  return c.textContent || '';
+}
+
+const AR_RE = /[؀-ۿݐ-ݿ]/;
+const LA_RE = /[A-Za-zÀ-ÿ]/;
+const dirOf = t => {
+  const str = String(t);
+  const first = str.match(/[\u0600-\u06FF\u0750-\u077F]|[A-Za-zÀ-ÿ]/);
+  if (!first) return 'rtl';
+  const ar = (str.match(/[\u0600-\u06FF\u0750-\u077F]/g) || []).length;
+  const la = (str.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+  if (ar > la * 4) return 'rtl';
+  if (la > ar * 4) return 'ltr';
+  return LA_RE.test(first[0]) ? 'ltr' : 'rtl';
+};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* pdf.js is fetched from a CDN by the script tag above. When that request
+   fails — no network, a blocked or slow CDN, or the page opened straight from
+   disk — `pdfjsLib` is simply not there. This line used to be the first
+   statement in the file and threw a ReferenceError, which aborted the whole
+   script: not one button below ever got its handler, and the app sat there
+   looking alive and answering nothing. Nothing may depend on the library
+   merely existing. */
+const PDFJS = (typeof pdfjsLib !== 'undefined' && pdfjsLib) ? pdfjsLib : null;
+if (PDFJS) PDFJS.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* Any uncaught error from here on becomes a visible strip, never silence. */
+function banner(html, kind){
+  let el = document.getElementById('banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'banner'; el.className = 'banner';
+    document.body.insertBefore(el, document.body.firstChild);
+    el.addEventListener('click', e => {
+      if (e.target.classList.contains('bx')) el.hidden = true;
+    });
+  }
+  if (el._html === html && !el.hidden) return;   // never say the same thing twice
+  el._html = html;
+  el.className = 'banner ' + (kind || '');
+  el.innerHTML = '<button class="bx" aria-label="إغلاق">×</button>' + html;
+  el.hidden = false;
+}
+window.addEventListener('error', e => {
+  banner('<b>توقّف شيء في التطبيق.</b> ' + esc(String((e && e.message) || e)) +
+         ' — أعد تحميل الصفحة، وإن تكرّر فأبلغني بهذا النص.', 'bad');
+});
+window.addEventListener('unhandledrejection', e => {
+  console.warn('unhandled', e.reason);
+});
+
+const S = { glosses: [], lexicon: [], cache: new Map(), tab: 'gloss', n: 0,
+            pdf: null, pdfDocId: null, docId: null, pages: [], summary: '',
+            shelf: [], restoring: false, speak: false, gloss: true, lastWord: '',
+            warnedStore: false };
+
+/* ============ typography ============ */
+let size = 1, lead = 1;
+/* The dial multiplies the screen-derived base rather than replacing it, so
+   "one step larger" means the same thing on a phone and on a monitor. */
+const setType = () => {
+  const r = document.documentElement.style;
+  r.setProperty('--scale', size.toFixed(3));
+  r.setProperty('--leading', lead.toFixed(3));
+  try {
+    localStorage.setItem('hashiya.type', JSON.stringify({ s: size, l: lead }));
+  } catch(e){}
+};
+try {
+  const t = JSON.parse(localStorage.getItem('hashiya.type') || 'null');
+  if (t && t.s) { size = t.s; lead = t.l || 1; }
+} catch(e){}
+$('fPlus').onclick  = () => { size = Math.min(1.65, size + .07); setType(); };
+$('fMinus').onclick = () => { size = Math.max(.78,  size - .07); setType(); };
+$('lPlus').onclick  = () => { lead = Math.min(1.35, lead + .07); setType(); };
+$('lMinus').onclick = () => { lead = Math.max(.75,  lead - .07); setType(); };
+
+/* ============ storage: IndexedDB, with a floor under it ============ */
+/* Two things used to go wrong here, both silently:
+   - opening the database can hang forever (it fires neither success nor error
+     when another tab holds it, and it is simply absent on file:// in Chrome),
+     which froze every button that awaited it;
+   - a failed write was swallowed, so saving the key looked like it worked and
+     the key was gone on the next visit.
+   Now every database call is time-boxed, small values fall back to
+   localStorage, and failure is reported instead of hidden. */
+const IDB_TIMEOUT = 2500;
+const withTimeout = (promise, ms, what) => Promise.race([
+  promise,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('انتهت مهلة ' + what)), ms))
+]);
+
+let dbBroken = null;   // null = untested, '' = fine, otherwise the reason
+
+const DB = (() => {
+  let p, dead = null;   // once the database has proved unusable, stop paying the
+                        // timeout again on every single read and write
+  const open = () => {
+    if (dead) return Promise.reject(dead);
+    return p || (p = withTimeout(new Promise((res, rej) => {
+      let r;
+      try { r = indexedDB.open('hashiya', 1); }
+      catch(e){ return rej(e); }
+      if (!r) return rej(new Error('التخزين غير متاح في هذا السياق'));
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror   = () => rej(r.error || new Error('open error'));
+      r.onblocked = () => rej(new Error('نافذة أخرى من التطبيق تحتجز التخزين'));
+    }), IDB_TIMEOUT, 'فتح التخزين').catch(e => { p = null; dead = e; throw e; }));
+  };
+
+  const tx = async (mode, fn) => {
+    const db = await open();
+    return withTimeout(new Promise((res, rej) => {
+      let t;
+      try { t = db.transaction('kv', mode); }
+      catch(e){ return rej(e); }
+      t.onabort = () => rej(t.error || new Error('aborted'));
+      const req = fn(t.objectStore('kv'));
+      req.onsuccess = () => res(req.result);
+      req.onerror   = () => rej(req.error || new Error('tx error'));
+    }), IDB_TIMEOUT, 'الكتابة في التخزين');
+  };
+  return {
+    get: k => tx('readonly',  s => s.get(k)),
+    set: (k, v) => tx('readwrite', s => s.put(v, k)),
+    del: k => tx('readwrite', s => s.delete(k))
+  };
+})();
+
+/* small values (settings) survive even with no IndexedDB at all */
+const FB = 'hashiya.fb.';
+const fbGet = k => { try { const v = localStorage.getItem(FB + k); return v == null ? null : JSON.parse(v); } catch(e){ return null; } };
+const fbSet = (k,v) => { try { localStorage.setItem(FB + k, JSON.stringify(v)); return true; } catch(e){ return false; } };
+const fbDel = k => { try { localStorage.removeItem(FB + k); }catch(e){} };
+
+async function sget(k){
+  try { const v = await DB.get(k); dbBroken = ''; if (v !== undefined && v !== null) return v; }
+  catch(e){ dbBroken = e.message || 'تعذّر فتح التخزين'; }
+  return fbGet(k);
+}
+/* resolves to true only when the value is really on disk somewhere */
+async function sset(k,v){
+  try { await DB.set(k, v); dbBroken = ''; return true; }
+  catch(e){ dbBroken = e.message || 'تعذّرت الكتابة'; console.warn('storage', e); }
+  return fbSet(k, v);
+}
+async function sdel(k){ try{ await DB.del(k); }catch(e){} fbDel(k); }
+
+/* ============ settings + API ============ */
+/* The key lives in IndexedDB, not localStorage: on iOS, Safari clears a site's
+   localStorage after seven days without a visit, while storage granted the
+   "persistent" flag is exempt. So the key is written to the same durable store
+   as the books, and the flag is requested the moment a key is saved. */
+/* ============ providers ============
+   The app speaks to the model straight from the page, with no server of its
+   own, which is what keeps everything local. That choice decides who can be
+   added: a provider must allow cross-origin calls from a browser.
+     · Anthropic  — allows it with an explicit header.
+     · Gemini     — its native REST endpoint allows it, and has a free tier.
+     · OpenRouter — allows it, and is one key to many models, DeepSeek and
+                    Llama among them, some of them free.
+     · OpenAI, DeepSeek direct — send no CORS headers; the browser refuses the
+                    request before it leaves. They need a server in between,
+                    which this app deliberately does not have. */
+const PROVIDERS = {
+  anthropic: {
+    name: 'Anthropic — Claude',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
+    models: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'],
+    vision: true,
+    build(body, key){
+      return {
+        url: 'https://api.anthropic.com/v1/messages',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key,
+                   'anthropic-version': '2023-06-01',
+                   'anthropic-dangerous-direct-browser-access': 'true' },
+        payload: {
+          model: body.model, max_tokens: body.maxTokens, messages: body.messages,
+          ...(body.system ? { system: body.system } : {}),
+          ...(body.temperature !== undefined ? { temperature: body.temperature } : {})
+        }
+      };
+    },
+    read(d){
+      if (d.error) throw new Error(d.error.message || 'api error');
+      return { text: (d.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim(),
+               truncated: d.stop_reason === 'max_tokens' };
+    }
+  },
+
+  gemini: {
+    name: 'Google — Gemini',
+    keyUrl: 'https://aistudio.google.com/apikey',
+    models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+    vision: true,
+    build(body, key){
+      const parts = [];
+      body.messages.forEach(m => {
+        const c = m.content;
+        if (typeof c === 'string') { parts.push({ text: c }); return; }
+        (c || []).forEach(b => {
+          if (b.type === 'text') parts.push({ text: b.text });
+          else if (b.type === 'image')
+            parts.push({ inline_data: { mime_type: b.source.media_type, data: b.source.data } });
+        });
+      });
+      return {
+        url: 'https://generativelanguage.googleapis.com/v1beta/models/'
+           + encodeURIComponent(body.model) + ':generateContent?key=' + encodeURIComponent(key),
+        headers: { 'Content-Type': 'application/json' },
+        payload: {
+          contents: [{ role: 'user', parts }],
+          ...(body.system ? { systemInstruction: { parts: [{ text: body.system }] } } : {}),
+          generationConfig: {
+            maxOutputTokens: body.maxTokens,
+            ...(body.temperature !== undefined ? { temperature: body.temperature } : {})
+          }
+        }
+      };
+    },
+    read(d){
+      if (d.error) throw new Error(d.error.message || 'api error');
+      const cand = (d.candidates || [])[0];
+      if (!cand) throw new Error('لم يُعِد المزوّد أي جواب');
+      const text = ((cand.content && cand.content.parts) || [])
+        .map(pt => pt.text || '').join('\n').trim();
+      return { text, truncated: cand.finishReason === 'MAX_TOKENS' };
+    }
+  },
+
+  deepseek: {
+    name: 'DeepSeek',
+    keyUrl: 'https://platform.deepseek.com/api_keys',
+    models: ['deepseek-chat', 'deepseek-reasoner'],
+    vision: false,          // نماذجه نصّية: لا تصلح للاستخلاص البصري
+    build(body, key){
+      const msgs = body.messages.map(m => {
+        const c = m.content;
+        if (typeof c === 'string') return { role: m.role, content: c };
+        // a text-only model: image blocks are dropped rather than sent and refused
+        return { role: m.role, content: (c || []).filter(b => b.type === 'text')
+                                                 .map(b => b.text).join('\n') };
+      });
+      if (body.system) msgs.unshift({ role: 'system', content: body.system });
+      return {
+        url: 'https://api.deepseek.com/chat/completions',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        payload: {
+          model: body.model, messages: msgs, max_tokens: body.maxTokens,
+          ...(body.temperature !== undefined ? { temperature: body.temperature } : {})
+        }
+      };
+    },
+    read(d){
+      if (d.error) throw new Error((d.error.message || d.error) + '');
+      const ch = (d.choices || [])[0];
+      if (!ch) throw new Error('لم يُعِد المزوّد أي جواب');
+      return { text: String((ch.message && ch.message.content) || '').trim(),
+               truncated: ch.finish_reason === 'length' };
+    }
+  },
+
+  openrouter: {
+    name: 'OpenRouter — نماذج كثيرة بمفتاح واحد',
+    keyUrl: 'https://openrouter.ai/keys',
+    models: ['deepseek/deepseek-chat', 'google/gemini-2.0-flash-exp:free',
+             'meta-llama/llama-3.3-70b-instruct', 'openai/gpt-4o-mini'],
+    vision: 'depends',
+    build(body, key){
+      const msgs = body.messages.map(m => {
+        const c = m.content;
+        if (typeof c === 'string') return { role: m.role, content: c };
+        return { role: m.role, content: (c || []).map(b =>
+          b.type === 'image'
+            ? { type: 'image_url', image_url: { url: 'data:' + b.source.media_type + ';base64,' + b.source.data } }
+            : { type: 'text', text: b.text }) };
+      });
+      if (body.system) msgs.unshift({ role: 'system', content: body.system });
+      return {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key,
+                   'HTTP-Referer': location.origin || 'https://hashiya.app',
+                   'X-Title': 'Hashiya Reader' },
+        payload: {
+          model: body.model, messages: msgs, max_tokens: body.maxTokens,
+          ...(body.temperature !== undefined ? { temperature: body.temperature } : {})
+        }
+      };
+    },
+    read(d){
+      if (d.error) throw new Error((d.error.message || d.error) + '');
+      const ch = (d.choices || [])[0];
+      if (!ch) throw new Error('لم يُعِد المزوّد أي جواب');
+      return { text: String((ch.message && ch.message.content) || '').trim(),
+               truncated: ch.finish_reason === 'length' };
+    }
+  }
+};
+
+const CFG = { provider: 'anthropic', keys: {}, models: {},
+              voice: '', rate: .85, latin: 'auto', persisted: false,
+              get key(){ return this.keys[this.provider] || ''; },
+              set key(v){ this.keys[this.provider] = v; },
+              get model(){ return this.models[this.provider] || PROVIDERS[this.provider].models[0]; },
+              set model(v){ this.models[this.provider] = v; } };
+
+async function askPersist(){
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return false;
+    CFG.persisted = await navigator.storage.persisted() || await navigator.storage.persist();
+  } catch(e){ CFG.persisted = false; }
+  return CFG.persisted;
+}
+
+let cfgDirty = false;   // the user has typed a key; a late load must not clobber it
+let keyForced = false;  // the shape warning has been shown once and overridden
+
+async function loadCfg(){
+  const [k, m] = [await sget('cfg.key'), await sget('cfg.model')];
+  let oldK = null, oldM = null;
+  try { oldK = localStorage.getItem('hashiya.key'); oldM = localStorage.getItem('hashiya.model'); } catch(e){}
+
+  if (cfgDirty) return CFG;
+
+  const keys = (await sget('cfg.keys')) || {};
+  const models = (await sget('cfg.models')) || {};
+  CFG.provider = (await sget('cfg.provider')) || 'anthropic';
+  if (!PROVIDERS[CFG.provider]) CFG.provider = 'anthropic';
+  CFG.keys = keys; CFG.models = models;
+
+  // an existing single key belongs to Anthropic; carry it over once
+  if (!CFG.keys.anthropic && (k || oldK)) CFG.keys.anthropic = k || oldK;
+  if (!CFG.models.anthropic && (m || oldM)) CFG.models.anthropic = m || oldM;
+  CFG.voice = (await sget('cfg.voice')) || '';
+  CFG.rate  = Number(await sget('cfg.rate')) || .85;
+  CFG.latin = (await sget('cfg.latin')) || 'auto';
+
+  // one-time migration out of the evictable store
+  if (!k && oldK) {
+    await saveCfg();
+    try { localStorage.removeItem('hashiya.key'); localStorage.removeItem('hashiya.model'); } catch(e){}
+  } else if (CFG.key) { await askPersist(); }
+  return CFG;
+}
+
+async function saveCfg(){
+  if (CFG.key) await askPersist();
+  const a = await sset('cfg.keys', CFG.keys);
+  const b = await sset('cfg.models', CFG.models);
+  await sset('cfg.provider', CFG.provider);
+  await sset('cfg.voice', CFG.voice);
+  await sset('cfg.rate', CFG.rate);
+  await sset('cfg.latin', CFG.latin);
+  return a && b;
+}
+
+const cfgReady = loadCfg().catch(e => { console.warn('cfg', e); return CFG; });
+
+function showKeyState(msg){
+  const el = $('keyState'); if (!el) return;
+  $('keyForget').hidden = !CFG.key;
+
+  if (msg === 'shape') {
+    const want = { anthropic: 'sk-ant-…', openrouter: 'sk-or-…',
+                 gemini: 'AIza…', deepseek: 'sk-…' }[CFG.provider];
+    el.className = 'hint keystate warn';
+    const guess = /^sk-[0-9a-f]{20,}$/i.test(CFG.key) ? 'DeepSeek'
+                : /^sk-ant-/.test(CFG.key) ? 'Anthropic'
+                : /^sk-or-/.test(CFG.key) ? 'OpenRouter'
+                : /^AIza/.test(CFG.key) ? 'Gemini' : '';
+    el.className = 'hint keystate warn';
+    el.innerHTML = '<b>هذا المفتاح لا يشبه مفاتيح ' + esc((PROVIDERS[CFG.provider]||{}).name || '') + '.</b> '
+      + 'مفاتيحه تبدأ بـ<code>' + esc(want || '') + '</code>. '
+      + (guess ? 'ويبدو أنه <b>مفتاح ' + guess + '</b> — بدّل المزوّد أعلاه إليه. ' : '')
+      + 'وإن كنت واثقاً، اضغط <b>احفظه رغم ذلك</b>.';
+    return;
+  }
+  if (msg === 'fail') {
+    el.className = 'hint keystate warn';
+    el.innerHTML = '<b>لم يُحفظ المفتاح.</b> هذا المتصفح يمنع التخزين هنا'
+      + (dbBroken ? ' (' + esc(dbBroken) + ')' : '')
+      + '. الأرجح أنك تفتح الملف من القرص مباشرة (file://) أو في نافذة تصفّح خفي.'
+      + ' افتح التطبيق عبر <b>http://localhost</b> أو عبر رابط منشور، ثم أعد المحاولة.';
+    return;
+  }
+  const pname = (PROVIDERS[CFG.provider] || {}).name || '';
+  if (!CFG.key) { el.className = 'hint keystate';
+    el.textContent = 'لا مفتاح محفوظ لـ' + pname + ' بعد.'; return; }
+
+  const onlyFallback = dbBroken;
+  el.className = 'hint keystate' + (CFG.persisted && !onlyFallback ? '' : ' warn');
+  el.innerHTML = onlyFallback
+    ? 'المفتاح محفوظ في <b>مخزن احتياطي</b> لأن التخزين الرئيسي غير متاح هنا — قد يمحوه المتصفح. افتح التطبيق عبر رابط منشور أو localhost ليُحفظ حفظاً دائماً.'
+    : CFG.persisted
+      ? 'المفتاح محفوظ في <b>تخزين دائم</b> على هذا الجهاز — لن يُمحى تلقائياً، ولن تحتاج إدخاله ثانية.'
+      : 'المفتاح محفوظ، لكن المتصفح لم يمنح صفة <b>الدوام</b> بعد. ثبّت التطبيق على الشاشة الرئيسية فتُمنح غالباً.';
+}
+
+/* The three options are written into the page itself, so the menu is never
+   empty even if something upstream of this function fails. This only adds any
+   provider the page does not already list, and selects the current one. */
+function fillProviders(){
+  const sel = $('provInput'); if (!sel) return;
+  try {
+    const have = new Set([...sel.options].map(o => o.value));
+    Object.keys(PROVIDERS).forEach(id => {
+      if (have.has(id)) return;
+      const o = document.createElement('option');
+      o.value = id; o.textContent = PROVIDERS[id].name;
+      sel.appendChild(o);
+    });
+    if (PROVIDERS[CFG.provider]) sel.value = CFG.provider;
+    else { CFG.provider = 'anthropic'; sel.value = 'anthropic'; }
+  } catch(e){ console.warn('providers', e); }
+  syncProvider();
+}
+
+/* Switching provider swaps in that provider's own key and model, so one
+   account's credentials are never sent to another. */
+function syncProvider(){
+  const p = PROVIDERS[CFG.provider] || PROVIDERS.anthropic;
+  if (!p) return;
+  try {
+  $('modelList').innerHTML = p.models.map(m => `<option value="${esc(m)}">`).join('');
+  $('keyInput').value = CFG.keys[CFG.provider] || '';
+  $('modelInput').value = CFG.models[CFG.provider] || p.models[0];
+  $('keyInput').placeholder = CFG.provider === 'anthropic' ? 'sk-ant-…'
+                            : CFG.provider === 'openrouter' ? 'sk-or-…' : 'AIza…';
+  const note = $('provNote');
+  if (note) note.innerHTML =
+    'المفتاح من <a href="' + p.keyUrl + '" target="_blank" rel="noopener">' + esc(p.keyUrl) + '</a>. '
+    + (p.vision === true ? 'يقرأ الصور، فيصلح للاستخلاص البصري.'
+       : 'قراءة الصور تتوقّف على النموذج الذي تختاره — بعضها لا يقرأها فيتعذّر الاستخلاص البصري.')
+    + (CFG.provider === 'gemini' ? ' <b>وله فئة مجانية.</b>' : '')
+    + (CFG.provider === 'openrouter' ? ' <b>وفيه نماذج مجانية تنتهي أسماؤها بـ<code>:free</code>.</b>' : '');
+  } catch(e){ console.warn('syncProvider', e); }
+}
+
+$('provInput').onchange = () => {
+  cfgDirty = true;
+  CFG.provider = $('provInput').value;
+  syncProvider(); showKeyState();
+};
+
+$('setBtn').onclick = async () => {
+  const kIn = $('keyInput'), mIn = $('modelInput');
+  fillProviders();
+  $('rateInput').value = String(CFG.rate);
+  $('latinInput').value = CFG.latin || 'auto';
+  loadVoices();                            // refresh the list; it may have arrived late
+  $('modal').hidden = false;              // opens instantly, whatever storage does
+  showKeyState();
+  const typed = kIn.value;
+  try { await cfgReady; } catch(e){}
+  if (kIn.value === typed && !cfgDirty) fillProviders();
+  showKeyState();
+};
+$('modalClose').onclick = () => $('modal').hidden = true;
+$('modalSave').onclick = async () => {
+  const b = $('modalSave'); const label = b.textContent;
+  b.disabled = true; b.textContent = 'يُحفظ…';
+  try { await cfgReady; } catch(e){}          // let any pending load settle first
+  cfgDirty = true;
+  CFG.provider = $('provInput').value || 'anthropic';
+  if (!PROVIDERS[CFG.provider]) CFG.provider = 'anthropic';
+  CFG.key = $('keyInput').value.trim();
+  CFG.model = ($('modelInput').value || '').trim() || PROVIDERS[CFG.provider].models[0];
+
+  // A key pasted under the wrong provider fails later with a confusing
+  // rejection, so the shape is checked here where it can still be corrected.
+  // Key formats change, and a provider may issue a shape this app has not
+  // heard of. So the check advises and can be overridden — it must never be
+  // the reason a valid key cannot be saved.
+  const shape = { anthropic: /^sk-ant-/, openrouter: /^sk-or-/,
+                  gemini: /^AIza/, deepseek: /^sk-[0-9a-f]{20,}$/i }[CFG.provider];
+  if (CFG.key && shape && !shape.test(CFG.key) && !keyForced) {
+    keyForced = true;                     // the next press saves regardless
+    b.disabled = false; btnLabel(b, '⤓', 'احفظه رغم ذلك');
+    b.textContent = 'احفظه رغم ذلك';
+    showKeyState('shape');
+    return;                               // dialog stays open, nothing saved yet
+  }
+  keyForced = false;
+  CFG.voice = $('voiceInput').value; CFG.rate = Number($('rateInput').value) || .85;
+  CFG.latin = $('latinInput').value || 'auto';
+  let ok = false;
+  try { ok = await saveCfg(); } catch(e){ ok = false; }
+  finally { b.disabled = false; b.textContent = label; }
+  showKeyState(ok ? undefined : 'fail');
+  if (ok) $('modal').hidden = true;   // on failure the dialog stays, and says why
+};
+$('keyForget').onclick = async () => {
+  cfgDirty = true;
+  CFG.key = ''; $('keyInput').value = '';
+  await saveCfg(); showKeyState();
+};
+$('voiceTest').onclick = () => {
+  CFG.voice = $('voiceInput').value; CFG.rate = Number($('rateInput').value) || .85;
+  say('The quick brown fox jumps over the lazy dog.', 'en-GB');
+};
+$('voiceInput').onchange = () => { CFG.voice = $('voiceInput').value; };
+$('modal').addEventListener('click', e => { if (e.target === $('modal')) $('modal').hidden = true; });
+
+class NoKey extends Error {}
+
+/* The API answers billing and auth problems in English prose. Translate the
+   ones a reader will actually hit into a sentence that says what to do. */
+/* Billing and auth failures are properties of the account, not of the word
+   that happened to be clicked. Repeating the full explanation inside every
+   gloss card buried the margin in the same four lines over and over. These
+   are raised once, at the top, and each card then says one short line. */
+const ACCOUNT_ERR = /credit balance is too low|insufficient|billing|invalid.*api.?key|authentication|401/i;
+function isAccountError(msg){ return ACCOUNT_ERR.test(String(msg || '')); }
+
+function apiHint(msg){
+  const m = String(msg || '');
+  if (/quota|rate.?limit exceeded|RESOURCE_EXHAUSTED/i.test(m) && CFG.provider === 'gemini')
+    return 'تجاوزت حصّة الفئة المجانية في Gemini. انتظر حتى تتجدّد، أو فعّل الفوترة في '
+         + '<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>، '
+         + 'أو بدّل المزوّد من ⚙︎.';
+  if (/credit balance is too low|insufficient|billing/i.test(m))
+    return 'رصيد حسابك في واجهة Anthropic البرمجية نفد. اشحنه من '
+         + '<a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">Plans &amp; Billing</a>. '
+         + 'انتبه: اشتراك Claude الشهري لا يشمل الواجهة البرمجية — رصيدها يُشترى على حدة.';
+  if (/invalid.*api.?key|authentication|401|x-api-key|api key not valid|unauthorized/i.test(m)) {
+    const p = PROVIDERS[CFG.provider] || PROVIDERS.anthropic;
+    return 'المفتاح مرفوض من ' + esc(p.name) + '. تأكّد أنك نسخته كاملاً من '
+         + '<a href="' + p.keyUrl + '" target="_blank" rel="noopener">' + esc(p.keyUrl) + '</a>، '
+         + 'ثم أعد إدخاله من ⚙︎. وتأكّد أن المفتاح يخصّ المزوّد المختار.';
+  }
+  if (/CORS|المتصفح/i.test(m))
+    return 'هذا المزوّد يمنع النداء المباشر من المتصفح. اختر Gemini أو OpenRouter من ⚙︎ — كلاهما يسمح به.';
+  if (/rate.?limit|429|overloaded|529/i.test(m))
+    return 'تجاوزت حدّ الطلبات أو الخدمة مزدحمة. انتظر قليلاً ثم أعد المحاولة.';
+  if (/model/i.test(m) && /not.?found|invalid|does not exist/i.test(m))
+    return 'النموذج المختار غير متاح لحسابك. اختر نموذجاً آخر من ⚙︎.';
+  if (/failed to fetch|networkerror|load failed/i.test(m))
+    return 'تعذّر الوصول إلى الشبكة. تحقّق من اتصالك.';
+  return '';
+}
+/* A reply that hit the token ceiling is cut off mid-sentence and looks
+   exactly like a complete one. For transcription that is the worst possible
+   failure, so the stop reason is carried out of here rather than discarded. */
+class Truncated extends Error {
+  constructor(text){ super('max_tokens'); this.partial = text; }
+}
+
+/* The name is historical; it speaks to whichever provider is selected.
+   Callers pass Anthropic-shaped messages and each adapter translates. */
+async function callClaude(messages, maxTokens = 1000, opts){
+  try { await cfgReady; } catch(e){}
+  if (!CFG.key) { showKeyState(); $('modal').hidden = false; throw new NoKey('no key'); }
+
+  const prov = PROVIDERS[CFG.provider] || PROVIDERS.anthropic;
+  const req = prov.build({
+    model: CFG.model, maxTokens, messages,
+    system: opts && opts.system,
+    temperature: opts && opts.temperature
+  }, CFG.key);
+
+  let res;
+  try {
+    res = await fetch(req.url, { method: 'POST', headers: req.headers,
+                                 body: JSON.stringify(req.payload) });
+  } catch(e){
+    // A browser refusing the request looks exactly like a network outage,
+    // so say which it probably is rather than leaving you guessing.
+    throw new Error('تعذّر الوصول إلى ' + prov.name
+      + '. تحقّق من اتصالك؛ وإن كان الاتصال سليماً فقد يكون المزوّد يمنع النداء'
+      + ' المباشر من المتصفح (CORS).');
+  }
+
+  let data;
+  try { data = await res.json(); }
+  catch(e){ throw new Error('ردّ غير مفهوم من ' + prov.name + ' (رمز ' + res.status + ')'); }
+
+  const out = prov.read(data);
+  if (out.truncated && !(opts && opts.allowTruncation)) throw new Truncated(out.text);
+  return (opts && opts.meta) ? { text: out.text, truncated: out.truncated } : out.text;
+}
+
+/* ============ file intake ============ */
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) intake(e.dataTransfer.files[0]); });
+$('file').onchange = e => { if (e.target.files[0]) intake(e.target.files[0]); };
+$('pickBtn').onclick = e => { e.stopPropagation(); $('file').click(); };
+$('openBtn').onclick = () => $('file').click();
+$('home').onclick = showIntro;
+
+function showIntro(){
+  if (pageWatcher) { pageWatcher.disconnect(); pageWatcher = null; }
+  S.docId = null;
+  $('reader').hidden = true; $('intro').hidden = false;
+  ['docTitle','findBox','dial','flagBtn','sumBtn','speakBtn','glossBtn','tocBtn','marginBtn','fab'].forEach(i => $(i).hidden = true);
+  hidePop();
+  openToc(false); openSheet(false);
+  $('toc').hidden = true; $('wrap').classList.add('no-toc');
+  renderShelf();
+}
+
+async function intake(file){
+  const id = 'doc:' + file.name.replace(/[^\w\u0600-\u06FF.-]/g,'_') + ':' + file.size;
+  if (file.type === 'text/plain' || /\.txt$/i.test(file.name)) {
+    const t = await file.text();
+    S.pdf = null; S.pdfDocId = null;
+    return mount({ id, title: file.name.replace(/\.[^.]+$/,''), pages: [{ n:1, text:t }], outline: [] });
+  }
+  if (!PDFJS) {
+    banner('<b>مكتبة قراءة PDF لم تُحمّل.</b> يجلبها التطبيق من الإنترنت أول مرة. '
+         + 'اتصل بالشبكة وأعد تحميل الصفحة — بعدها تعمل دون اتصال. '
+         + 'أما ملفات <code>.txt</code> فتُفتح الآن.', 'bad');
+    return;
+  }
+  $('progbar').hidden = false; $('progtext').textContent = 'يُفتح الملف…';
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await PDFJS.getDocument({ data: buf }).promise;
+    S.pdf = pdf; S.pdfDocId = id;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      pages.push({ n: i, text: await pageText(page) });
+      const pct = Math.round(i / pdf.numPages * 100);
+      $('progfill').style.width = pct + '%';
+      $('progtext').textContent = `يُستخرج النص… صفحة ${AR(i)} من ${AR(pdf.numPages)}`;
+      if (i % 12 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    const outline = await readOutline(pdf);
+    let title = file.name.replace(/\.pdf$/i,'');
+    try { const md = await pdf.getMetadata(); if (md.info && md.info.Title && md.info.Title.trim().length > 3) title = md.info.Title.trim(); } catch(e){}
+    $('progbar').hidden = true; $('progtext').textContent = '';
+    mount({ id, title, pages, outline });
+  } catch (err) {
+    $('progbar').hidden = true;
+    $('progtext').textContent = 'تعذّر فتح الملف. تأكّد أنه PDF سليم غير محمي بكلمة سر.';
+  }
+}
+
+/* line grouping → paragraphs */
+async function pageText(page){
+  const tc = await page.getTextContent();
+  if (!tc.items.length) return '';
+  const lines = [];
+  let cur = null;
+  tc.items.forEach(it => {
+    const y = Math.round(it.transform[5]);
+    const h = Math.abs(it.transform[3]) || 10;
+    if (!cur || Math.abs(cur.y - y) > h * .6) { cur = { y, h, parts: [], w: 0 }; lines.push(cur); }
+    cur.parts.push(it.str);
+    cur.w += it.width || 0;
+  });
+  const widths = lines.map(l => l.w).filter(Boolean).sort((a,b) => a-b);
+  const full = widths.length ? widths[Math.floor(widths.length * .82)] : 0;
+  let out = '', prev = null;
+  lines.forEach(l => {
+    let t = l.parts.join('').replace(/\s+/g,' ').trim();
+    if (!t) return;
+    const gap = prev ? Math.abs(prev.y - l.y) : 0;
+    const shortPrev = prev && full && prev.w < full * .72;
+    if (out && (shortPrev || (prev && gap > prev.h * 1.9))) out += '\n\n';
+    else if (out) out = out.replace(/-$/, '') + (/-$/.test(out) ? '' : ' ');
+    out += t;
+    prev = l;
+  });
+  return out.trim();
+}
+
+async function readOutline(pdf){
+  let items = [];
+  try { items = await pdf.getOutline() || []; } catch(e){ return []; }
+  const flat = [];
+  async function walk(arr, lvl){
+    for (const it of arr) {
+      let pageNum = null;
+      try {
+        let dest = it.dest;
+        if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+        if (Array.isArray(dest) && dest[0]) pageNum = (await pdf.getPageIndex(dest[0])) + 1;
+      } catch(e){}
+      flat.push({ title: it.title, page: pageNum, lvl });
+      if (it.items && it.items.length && lvl < 2) await walk(it.items, lvl + 1);
+    }
+  }
+  await walk(items, 1);
+  return flat.slice(0, 260);
+}
+
+/* ============ mount a document ============ */
+async function mount(doc){
+  if (S.pdfDocId !== doc.id) { S.pdf = null; S.pdfDocId = null; }
+  S.docId = doc.id; S.pages = doc.pages; S.glosses = []; S.n = 0; S.summary = '';
+  S.restoring = true;
+  $('docTitle').textContent = doc.title; $('docTitle').dir = dirOf(doc.title); $('docTitle').hidden = false;
+  ['findBox','dial','flagBtn','sumBtn','speakBtn','glossBtn','marginBtn'].forEach(i => $(i).hidden = false);
+  syncModes(true);
+  $('fab').hidden = false;
+  $('intro').hidden = true; $('reader').hidden = false;
+
+  renderPages();
+
+  if (doc.outline && doc.outline.length) {
+    // each entry declares its own direction, or "2. Social Cognitive Career
+    // Theory" renders with its number thrown to the far end of the line
+    $('tocList').innerHTML = doc.outline.map((o,i) =>
+      `<a data-page="${o.page || ''}" dir="${dirOf(o.title)}" class="${o.lvl===2?'lvl2':''}">${esc(o.title)}${o.page?` <span class="bmeta">${AR(o.page)}</span>`:''}</a>`).join('');
+    $('tocList').querySelectorAll('a').forEach(a => a.onclick = () => { goPage(+a.dataset.page); openToc(false); });
+    $('toc').hidden = false; $('tocBtn').hidden = false; $('wrap').classList.remove('no-toc');
+  } else { $('toc').hidden = true; $('tocBtn').hidden = true; openToc(false); $('wrap').classList.add('no-toc'); }
+
+  const prev = await sget(doc.id);
+  const pos  = Number((prev && prev.pos) ?? doc.pos ?? 0) || 0;
+  const page = Number((prev && prev.page) ?? doc.page ?? 0) || 0;
+
+  const light = { id: doc.id, title: doc.title, outline: doc.outline || [],
+                  pages: doc.pages, at: new Date().toISOString().slice(0,10), pos, page };
+  const stored = await sset(doc.id, light);
+  if (!stored && !S.warnedStore) {
+    S.warnedStore = true;
+    banner('<b>تعذّر حفظ هذا الكتاب.</b> ستقرأه الآن، لكنه لن يكون في الرفّ حين تعود. '
+         + (location.protocol === 'file:'
+            ? 'السبب أنك تفتح التطبيق من ملف على القرص.'
+            : 'المتصفح رفض التخزين — قد تكون الذاكرة ممتلئة أو أنت في تصفّح خفي.'), 'bad');
+  }
+  await shelfAdd({ id: doc.id, title: doc.title, n: doc.pages.length, at: light.at });
+  askPersist();   // Android grants this readily once the app is installed
+
+  const settle = () => setTimeout(() => { S.restoring = false; }, 1400);
+  if (page > 1)       setTimeout(() => { goPage(page); settle(); }, 350);
+  else if (pos > 400) setTimeout(() => { window.scrollTo({ top: pos, behavior: 'smooth' }); settle(); }, 350);
+  else S.restoring = false;
+  renderMargin();
+}
+
+/* Pages are shells first; their text is built only when the page nears the
+   viewport. A 400-page book therefore costs 400 nodes on open, not 150,000. */
+let pageWatcher = null;
+
+function renderPages(){
+  const r = $('reader'); r.innerHTML = '';
+  if (pageWatcher) pageWatcher.disconnect();
+  pageWatcher = new IntersectionObserver(entries => {
+    entries.forEach(en => { if (en.isIntersecting) fillPage(en.target); });
+  }, { rootMargin: '250% 0px' });
+
+  S.pages.forEach(pg => {
+    const sec = document.createElement('section');
+    sec.className = 'pgsec'; sec.dataset.n = pg.n;
+    const mark = document.createElement('div');
+    mark.className = 'pagemark'; mark.id = 'pg' + pg.n; mark.textContent = 'صفحة ' + AR(pg.n);
+    sec.appendChild(mark);
+    r.appendChild(sec);
+    pageWatcher.observe(sec);
+  });
+}
+
+/* Build one page's text in place. Idempotent: a filled page is left alone,
+   so gloss markers and flagged words survive every later pass. */
+function fillPage(sec){
+  if (!sec || sec.dataset.filled) return sec;
+  const pg = S.pages.find(x => x.n === +sec.dataset.n);
+  if (!pg) return sec;
+  sec.dataset.filled = '1';
+  if (pageWatcher) pageWatcher.unobserve(sec);
+
+  if (!pg.text || pg.text.replace(/\s/g,'').length < 25) {
+    const d = document.createElement('div');
+    d.className = 'scanned';
+    d.innerHTML = `هذه الصفحة صورة بلا طبقة نصية.<br><button class="btn" data-ocr="${pg.n}">اقرأها بصرياً</button>`;
+    d.querySelector('[data-ocr]').onclick = e => ocrPage(pg.n, e.currentTarget);
+    sec.appendChild(d);
+    return sec;
+  }
+
+  const frag = document.createDocumentFragment();
+  pg.text.split(/\n{2,}/).forEach(par => {
+    if (!par.trim()) return;
+    const p = document.createElement('p');
+    /* The page is dir="rtl" for the Arabic interface, and every word sits in
+       its own span carrying unicode-bidi:isolate. An isolated span is a
+       neutral object to the bidi algorithm, so a whole paragraph of them is
+       laid out in the paragraph's direction — which reversed the word order
+       of every English sentence in the book. Each paragraph now declares the
+       direction of the language actually written in it. */
+    p.dir = dirOf(par);
+    // ⟨؟word⟩ is the transcriber admitting it could not read something. It is
+    // shown, not hidden, so a guess is never mistaken for the text itself.
+    // the rules ask for an Arabic question mark (؟); accept the Latin one too
+    par = par.replace(/⟨[?؟]?\s*([^⟩]*)⟩/g, (_, w) => '\u0001' + (w.trim() || '□') + '\u0002');
+    par.split(/([\p{L}\p{M}\p{Nd}''-]+)/gu).forEach(part => {
+      if (/^[\p{L}\p{M}\p{Nd}''-]+$/u.test(part)) {
+        const t = document.createElement('span');
+        t.className = 'tok' + (isLatin(part) ? ' latin' : '');
+        t.textContent = part;
+        // The gloss marker is appended *inside* this span, so textContent
+        // becomes "memory١" the moment a word is glossed. Everything that
+        // reads the word back — speaking it, glossing it again, keying the
+        // cache — would then work on a word that is not in the book.
+        t.dataset.w = part;
+        p.appendChild(t);
+      } else if (part) p.appendChild(document.createTextNode(part));
+    });
+    if (/[\u0001]/.test(p.textContent))
+      p.innerHTML = p.innerHTML.replace(/\u0001([^\u0002]*)\u0002/g,
+        '<span class="doubt" title="لم يستطع الناسخ قراءتها بيقين">$1</span>');
+    frag.appendChild(p);
+  });
+  sec.appendChild(frag);
+  return sec;
+}
+
+/* Rebuild a single page after its text changes — the rest of the book, and
+   every marker already placed in it, stays untouched. */
+function refillPage(n){
+  const sec = document.querySelector(`.pgsec[data-n="${n}"]`);
+  if (!sec) return;
+  [...sec.children].forEach(c => { if (!c.classList.contains('pagemark')) c.remove(); });
+  delete sec.dataset.filled;
+  fillPage(sec);
+}
+
+const pageSec = n => document.querySelector(`.pgsec[data-n="${n}"]`);
+
+function goPage(n){
+  const sec = pageSec(n);
+  if (!sec) return;
+  fillPage(sec);
+  requestAnimationFrame(() => $('pg' + n).scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+/* save reading position — the page number survives font changes, the pixel
+   offset gives the fine position within that page */
+function topPage(){
+  let best = 0;
+  document.querySelectorAll('#reader .pagemark').forEach(m => {
+    if (m.getBoundingClientRect().top <= 90) best = +m.id.slice(2);
+  });
+  return best;
+}
+let posTimer;
+window.addEventListener('scroll', () => {
+  if (!S.docId) return;
+  clearTimeout(posTimer);
+  posTimer = setTimeout(async () => {
+    if (S.restoring) return;
+    const d = await sget(S.docId);
+    if (!d) return;
+    d.pos = window.scrollY;
+    d.page = topPage();
+    await sset(S.docId, d);
+  }, 1200);
+});
+
+/* ============ shelf ============ */
+async function shelfAdd(entry){
+  const list = (await sget('shelf')) || [];
+  const next = [entry, ...list.filter(b => b.id !== entry.id)].slice(0, 24);
+  await sset('shelf', next); S.shelf = next;
+}
+async function renderShelf(){
+  S.shelf = (await sget('shelf')) || [];
+  $('shelf').hidden = !S.shelf.length;
+  $('shelfList').innerHTML = S.shelf.map(b =>
+    `<div class="book" data-id="${esc(b.id)}"><span class="bt" dir="${dirOf(b.title)}">${esc(b.title)}</span>
+     <span class="bmeta">${AR(b.n)} ص</span><button class="x" data-del="${esc(b.id)}" aria-label="إزالة">×</button></div>`).join('');
+  $('shelfList').querySelectorAll('.book').forEach(el => el.onclick = async e => {
+    if (e.target.dataset.del) return;
+    const d = await sget(el.dataset.id);
+    if (d) mount(d); else alert('لم يعد نص هذا الكتاب محفوظاً. افتح الملف من جديد.');
+  });
+  $('shelfList').querySelectorAll('[data-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    await sdel(b.dataset.del);
+    await sset('shelf', (await sget('shelf') || []).filter(x => x.id !== b.dataset.del));
+    renderShelf();
+  });
+}
+
+/* ==========================================================================
+   FAITHFUL TRANSCRIPTION OF A SCANNED PAGE
+   --------------------------------------------------------------------------
+   The API scales any image down to fit 1568px on the long edge and about
+   1.15 megapixels. Rendering the page at a higher zoom therefore buys nothing
+   — it is downscaled straight back. The only way to put real detail in front
+   of the model is to cut the page into pieces that each fit inside that
+   budget, so every piece arrives at full resolution.
+
+   The cuts are horizontal only. Splitting a page down the middle would slice
+   through the middle of words and scramble reading order, which is precisely
+   the failure this is meant to prevent. Bands overlap by several lines so no
+   line is lost at a seam, and the duplicated text is removed when the bands
+   are sewn back together.
+   ========================================================================== */
+
+const OCR = {
+  MAX_EDGE: 1500,        // stay just under the 1568 ceiling
+  MAX_PIXELS: 1.10e6,    // stay just under the ~1.15 MP ceiling
+  OVERLAP: 0.14,         // fraction of a band repeated in the next one
+  TOKENS: 8000           // a dense page of prose fits; truncation is detected
+};
+
+/* how tall a full-width band may be before it breaks the pixel budget */
+function bandPlan(pxW, pxH){
+  const maxBandH = Math.floor(OCR.MAX_PIXELS / pxW);
+  if (pxH <= maxBandH) return [{ y: 0, h: pxH }];
+  const step = Math.floor(maxBandH * (1 - OCR.OVERLAP));
+  const bands = [];
+  for (let y = 0; y < pxH; y += step) {
+    const h = Math.min(maxBandH, pxH - y);
+    bands.push({ y, h });
+    if (y + h >= pxH) break;
+  }
+  return bands;
+}
+
+const OCR_RULES = `أنت ناسخ محترف. مهمتك نسخ ما تراه في الصورة حرفاً بحرف، لا تفسيره ولا تحسينه.
+
+القواعد، وهي ملزمة:
+1. انسخ كل كلمة تراها، بلا استثناء. لا تحذف شيئاً لأنه يبدو هامشياً: العناوين، أرقام الصفحات، الحواشي السفلية، التسميات تحت الأشكال، أسماء المؤلفين — كلها نص يجب نسخه.
+2. حافظ على ترتيب الكلمات كما هو في الصورة تماماً. لا تعد صياغة جملة ولا تقدّم كلمة على أخرى.
+3. لا تصحّح خطأ إملائياً ولا نحوياً ولا مطبعياً. انسخ الخطأ كما هو.
+4. لا تترجم. لا تلخّص. لا تعلّق. لا تضف عنواناً من عندك.
+5. إن كان النص في عمودين أو أكثر، انسخ العمود الأول كاملاً من أعلاه إلى أسفله، ثم العمود التالي. لا تخلط بينهما سطراً بسطر.
+6. الكلمة المقطوعة بشرطة في آخر السطر: صِلها كلمةً واحدة وأزل الشرطة.
+7. الأسطر داخل الفقرة الواحدة: اجمعها في فقرة واحدة متصلة. وافصل بين كل فقرتين بسطر فارغ.
+8. كلمة لا تستطيع قراءتها بيقين: اكتبها بين قوسين هكذا ⟨؟كلمتك-المرجّحة⟩. وإن عجزت تماماً فاكتب ⟨؟⟩. لا تخمّن كلمة وتكتبها كأنك متيقّن. اختراع كلمة أسوأ من الاعتراف بعدم قراءتها.
+9. الجداول: انسخ كل خلية، وافصل بين خلايا الصف بعلامة | .
+10. أعد النص وحده. لا تبدأ بعبارة مثل "إليك النص" ولا تنهِ بملاحظة.`;
+
+/* Render one band of the page.
+
+   The offset is passed through pdf.js's own `transform` option rather than
+   ctx.translate(): pdf.js sets the canvas transform itself while painting, so
+   a translate applied beforehand is discarded. Every band would then have
+   rendered the top of the page, and the transcription would repeat the first
+   few lines and lose the rest of the page entirely.
+
+   PNG is preferred because JPEG ringing eats thin strokes and accents, but a
+   photographic scan can produce an enormous PNG. Past a size that is unkind
+   to a phone on mobile data, it falls back to JPEG at a quality high enough
+   that letterforms survive. */
+const IMG_BUDGET = 3.6e6;   // bytes of base64, comfortably under the API limit
+
+async function bandImage(page, scale, band){
+  const vp = page.getViewport({ scale });
+  const c = document.createElement('canvas');
+  c.width = Math.floor(vp.width);
+  c.height = Math.max(1, Math.floor(band.h));
+  const ctx = c.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+
+  await page.render({
+    canvasContext: ctx,
+    viewport: vp,
+    transform: [1, 0, 0, 1, 0, -band.y],
+    background: '#ffffff'
+  }).promise;
+
+  let media = 'image/png';
+  let data = c.toDataURL('image/png').split(',')[1];
+  if (data.length > IMG_BUDGET) {
+    media = 'image/jpeg';
+    data = c.toDataURL('image/jpeg', .92).split(',')[1];
+    if (data.length > IMG_BUDGET) data = c.toDataURL('image/jpeg', .82).split(',')[1];
+  }
+
+  // hand the memory back at once; a phone will not survive several of these
+  c.width = 0; c.height = 0;
+  return { data, media };
+}
+
+async function readBand(img, hint){
+  const msg = [{ role: 'user', content: [
+    { type: 'image', source: { type: 'base64', media_type: img.media, data: img.data } },
+    { type: 'text', text: OCR_RULES + (hint ? `\n\n${hint}` : '') }
+  ]}];
+  try {
+    return await callClaude(msg, OCR.TOKENS, { temperature: 0 });
+  } catch(e){
+    if (e instanceof Truncated) { e.partial = e.partial || ''; throw e; }
+    throw e;
+  }
+}
+
+/* ---- sewing two overlapping transcriptions together --------------------- */
+const wordsOf = t => String(t || '').trim().split(/\s+/).filter(Boolean);
+const keyOf   = w => w.toLowerCase().replace(/[^\p{L}\p{Nd}]/gu, '');
+
+/* Find where `next` repeats the tail of `prev` and return next's remainder.
+   Longest match wins, so a phrase that happens to recur does not fool it. */
+function stitch(prev, next){
+  if (!prev) return next;
+  if (!next) return prev;
+  const A = wordsOf(prev), B = wordsOf(next);
+  const WINDOW = Math.min(160, A.length, B.length);
+  const a = A.slice(-WINDOW).map(keyOf), b = B.slice(0, WINDOW).map(keyOf);
+
+  let best = 0;
+  for (let len = Math.min(a.length, b.length); len >= 4; len--) {
+    let ok = true;
+    for (let i = 0; i < len; i++) if (a[a.length - len + i] !== b[i]) { ok = false; break; }
+    if (ok) { best = len; break; }
+  }
+  if (!best) {
+    // no overlap found: keep everything rather than risk losing a line
+    return prev.replace(/\s+$/, '') + '\n\n' + next.replace(/^\s+/, '');
+  }
+  const rest = B.slice(best).join(' ');
+  const joiner = /\n\s*\n\s*$/.test(prev) ? '' : ' ';
+  return prev.replace(/\s+$/, '') + (rest ? joiner + rest : '');
+}
+
+/* ---- the verification pass ---------------------------------------------- */
+async function verifyPage(page, scale, text){
+  const vp = page.getViewport({ scale: Math.min(scale, OCR.MAX_EDGE / page.getViewport({ scale: 1 }).width) });
+  const c = document.createElement('canvas');
+  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+  const ctx = c.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
+  let media = 'image/png';
+  let b64 = c.toDataURL('image/png').split(',')[1];
+  if (b64.length > IMG_BUDGET) { media = 'image/jpeg'; b64 = c.toDataURL('image/jpeg', .9).split(',')[1]; }
+  c.width = 0; c.height = 0;
+
+  const prompt = `أمامك صورة صفحة، وأمامك نصّ نُسخ منها. مهمتك التدقيق لا إعادة النسخ.
+
+قارن النص بالصورة وابحث عن ثلاثة أنواع من الخلل فقط:
+- كلمة أو سطر أو فقرة في الصورة وليست في النص (سقوط).
+- كلمة في النص وليست في الصورة (إقحام).
+- كلمات ترتيبها في النص يخالف ترتيبها في الصورة (قلب).
+
+أعد مصفوفة JSON فقط، بلا أي نص خارجها. كل عنصر:
+{"type":"سقوط"|"إقحام"|"قلب","where":"مقتطف قصير من النص المجاور يحدّد الموضع","what":"ما الذي سقط أو أُقحم أو انقلب"}
+
+إن كان النص مطابقاً فأعد [] فقط. لا تُبلّغ عن فروق في التشكيل أو علامات الترقيم أو المسافات.
+
+النص المنسوخ:
+"""
+${text.slice(0, 12000)}
+"""`;
+
+  const raw = await callClaude([{ role: 'user', content: [
+    { type: 'image', source: { type: 'base64', media_type: media, data: b64 } },
+    { type: 'text', text: prompt }
+  ]}], 2000, { temperature: 0, allowTruncation: true });
+
+  try {
+    const j = String(raw).slice(String(raw).indexOf('['), String(raw).lastIndexOf(']') + 1);
+    const arr = JSON.parse(j);
+    return Array.isArray(arr) ? arr.slice(0, 40) : [];
+  } catch(e){ return []; }
+}
+
+/* ---- the whole operation ------------------------------------------------ */
+async function ocrPage(n, btn){
+  if (!S.pdf) { btn.textContent = 'أعد فتح الملف أولاً'; return; }
+  const prov = PROVIDERS[CFG.provider] || {};
+  if (prov.vision === false) {
+    banner('<b>' + esc(prov.name || '') + ' لا يقرأ الصور</b>، والاستخلاص البصري يحتاج ذلك. '
+         + 'بدّل المزوّد من ⚙︎ إلى Gemini أو Anthropic لهذه الصفحة.', 'bad');
+    return;
+  }
+  const label = btn.textContent;
+  btn.disabled = true;
+
+  const step = (t) => { btn.textContent = t; };
+  try {
+    const page = await S.pdf.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const scale = OCR.MAX_EDGE / base.width;          // full width, at the ceiling
+    const pxW = Math.floor(base.width * scale);
+    const pxH = Math.floor(base.height * scale);
+    const bands = bandPlan(pxW, pxH);
+
+    let text = '';
+    for (let i = 0; i < bands.length; i++) {
+      step(`تُقرأ الصفحة… ${AR(i + 1)}/${AR(bands.length)}`);
+      const img = await bandImage(page, scale, bands[i]);
+      const hint = bands.length > 1
+        ? `هذه شريحة رقم ${i + 1} من ${bands.length} من صفحة واحدة. قد تبدأ بسطر ناقص من أعلاه أو تنتهي بسطر ناقص من أسفله — انسخ ما تراه ولا تكمل ما لا تراه.`
+        : '';
+      let part;
+      try {
+        part = await readBand(img, hint);
+      } catch(e){
+        if (e instanceof Truncated) {
+          // the band was too dense: halve it and read each half
+          const half = Math.floor(bands[i].h / 2);
+          const a = await readBand(await bandImage(page, scale, { y: bands[i].y, h: half + 60 }), hint);
+          const b = await readBand(await bandImage(page, scale, { y: bands[i].y + half - 60, h: bands[i].h - half + 60 }), hint);
+          part = stitch(a, b);
+        } else throw e;
+      }
+      text = stitch(text, part);
+    }
+
+    step('تُدقَّق…');
+    let issues = [];
+    try { issues = await verifyPage(page, scale, text); } catch(e){ issues = []; }
+
+    const pg = S.pages.find(p => p.n === n);
+    if (pg && text) {
+      pg.text = text;
+      pg.ocr = { bands: bands.length, issues, at: new Date().toISOString().slice(0, 16) };
+      const scroll = window.scrollY;
+      refillPage(n); window.scrollTo(0, scroll);
+      const d = await sget(S.docId); if (d) { d.pages = S.pages; await sset(S.docId, d); }
+      reportOcr(n, pg.ocr);
+    } else {
+      step('لم يُقرأ نص'); btn.disabled = false; return;
+    }
+  } catch(e){
+    if (e instanceof NoKey) { step('أدخل المفتاح أولاً'); }
+    else if (isAccountError(e.message)) { banner(apiHint(e.message), 'bad'); step('تعذّرت القراءة'); }
+    else step('تعذّرت القراءة: ' + (e.message || '').slice(0, 40));
+    btn.disabled = false;
+  }
+}
+
+function reportOcr(n, info){
+  const bad = (info.issues || []).length;
+  if (!bad) {
+    banner(`صفحة ${AR(n)}: نُسخت في ${AR(info.bands)} شريحة، والتدقيق لم يجد سقوطاً ولا إقحاماً.`, '');
+    setTimeout(() => { const el = $('banner'); if (el) el.hidden = true; }, 4500);
+    return;
+  }
+  const list = info.issues.slice(0, 6).map(x =>
+    `<li><b>${esc(x.type || '')}</b> — ${esc(x.what || '')}${x.where ? ` <i>(${esc(String(x.where).slice(0, 60))})</i>` : ''}</li>`).join('');
+  banner(`<b>صفحة ${AR(n)}: التدقيق رصد ${AR(bad)} موضعاً يستحق نظرك.</b>`
+       + `<ul class="ocr-issues">${list}</ul>`
+       + (bad > 6 ? `<div>…و${AR(bad - 6)} غيرها.</div>` : ''), 'warn');
+}
+
+/* ============ search ============ */
+let findTimer;
+$('findInput').oninput = e => {
+  clearTimeout(findTimer);
+  findTimer = setTimeout(() => runFind(e.target.value.trim()), 260);
+};
+let hitList = [], hitAt = 0;
+const norm = s => s.replace(/[\u064B-\u0652\u0640]/g,'').toLowerCase();
+
+/* Search runs over the stored text of every page, not over the DOM — so it
+   reaches pages that have not been built yet. Only pages that actually
+   contain a hit are then built and highlighted. */
+function runFind(q){
+  document.querySelectorAll('.tok.hit').forEach(t => t.classList.remove('hit'));
+  hitList = []; hitAt = 0;
+  if (q.length < 2) { $('hits').textContent = ''; return; }
+  const nq = norm(q);
+
+  const pagesWithHit = S.pages.filter(pg => pg.text && norm(pg.text).includes(nq));
+  if (!pagesWithHit.length) { $('hits').textContent = 'لا نتيجة'; return; }
+  if (pagesWithHit.length > 120) {
+    $('hits').textContent = 'كلمة شائعة جداً — ضيّق البحث';
+    return;
+  }
+  pagesWithHit.forEach(pg => fillPage(pageSec(pg.n)));
+
+  pagesWithHit.forEach(pg => {
+    const sec = pageSec(pg.n); if (!sec) return;
+    sec.querySelectorAll('.tok').forEach(t => {
+      if (norm(tokWord(t)).includes(nq)) { t.classList.add('hit'); hitList.push(t); }
+    });
+  });
+  $('hits').textContent = hitList.length ? `${AR(hitList.length)} موضع` : 'لا نتيجة';
+  if (hitList.length) hitList[0].scrollIntoView({ behavior:'smooth', block:'center' });
+}
+$('findInput').onkeydown = e => {
+  if (e.key === 'Enter' && hitList.length) {
+    hitAt = (hitAt + 1) % hitList.length;
+    hitList[hitAt].scrollIntoView({ behavior:'smooth', block:'center' });
+    $('hits').textContent = `${AR(hitAt+1)} من ${AR(hitList.length)}`;
+  }
+};
+
+/* ============ phone: drawer and bottom sheet ============ */
+/* Guarded: an engine without matchMedia must not be able to abort the script
+   and take every button down with it, as the missing pdf.js once did. */
+const isPhone = () => {
+  try { return window.matchMedia('(max-width:900px)').matches; }
+  catch(e){ return (window.innerWidth || 1024) <= 900; }
+};
+
+function openToc(on){
+  const t = $('toc'); if (!t) return;
+  t.classList.toggle('open', on);
+  const b = $('tocBtn'); if (b) b.classList.toggle('on', on);
+  if (on) openDrawer(false);
+  scrim(on, () => openToc(false));
+}
+$('tocBtn').onclick = () => openToc(!$('toc').classList.contains('open'));
+$('marginBtn').onclick = () => openDrawer();
+
+/* The sheet rests with only its tabs showing so the page stays readable,
+   and rises when there is something to read in it. */
+function sheetOpen(){ const m = document.querySelector('.margin'); return !!(m && m.classList.contains('open')); }
+/* One name for both shapes: a bottom sheet on a phone, a side drawer on a
+   desktop. Callers should not have to know which. */
+function openSheet(on){ return openDrawer(on); }
+
+function openDrawer(on){
+  const m = document.querySelector('.margin'); if (!m) return;
+  const next = on !== undefined ? on : !m.classList.contains('open');
+  m.classList.toggle('open', next);
+  const b = $('marginBtn');
+  if (b) b.classList.toggle('on', next);
+  if (next) { sheetAnchor = window.scrollY; if (!isPhone()) openToc(false); }
+  scrim(next && !isPhone(), () => openDrawer(false));
+}
+
+/* a single shared backdrop, so two drawers cannot leave two behind */
+function scrim(on, onClose){
+  let sc = document.getElementById('scrim');
+  if (on && !sc) {
+    sc = document.createElement('div'); sc.id = 'scrim'; sc.className = 'scrim';
+    document.body.appendChild(sc);
+  }
+  if (sc) { sc.onclick = onClose || null; if (!on) sc.remove(); }
+}
+
+/* The sheet exists to be read, then got out of the way by hand — which meant
+   it sat over the page until you remembered to close it. Scrolling is exactly
+   the gesture that means "I am reading again", so it folds itself away. */
+let sheetAnchor = 0;
+window.addEventListener('scroll', () => {
+  if (!isPhone() || !sheetOpen()) return;
+  if (Math.abs(window.scrollY - sheetAnchor) > 60) openSheet(false);
+}, { passive: true });
+$('grip').onclick = () => openSheet();
+$('sheetX').onclick = () => openSheet(false);
+
+/* A button that is always there, because a bar that only appears on selection
+   is a button you cannot find when you have not selected anything yet. */
+function selectedText(){
+  const sel = window.getSelection();
+  return sel && !sel.isCollapsed ? sel.toString().trim() : '';
+}
+$('fab').onclick = () => {
+  const t = selectedText() || S.lastWord || '';
+  if (!t) {
+    banner('اضغط مطوّلاً على كلمة لتظليلها، ثم اضغط 🔊 لسماعها. '
+         + 'ويمكنك تظليل مقطع من كلمة أو حرف واحد.', '');
+    setTimeout(() => { const el = $('banner'); if (el) el.hidden = true; }, 4000);
+    return;
+  }
+  say(t, langFor(t, selBar && selBar._anchor));
+};
+/* keep it lit while there is something to say */
+document.addEventListener('selectionchange', () => {
+  const f = $('fab'); if (f) f.classList.toggle('armed', !!selectedText());
+});
+document.querySelectorAll('.tab').forEach(t =>
+  t.addEventListener('click', () => openDrawer(true)));
+
+/* ============ speak-on-tap mode ============ */
+/* The selection bar below is precise but invisible until you know it exists.
+   This is the discoverable path: switch it on and every word you touch is
+   pronounced. It needs no key, no credit and no network. */
+/* Two independent switches rather than one either/or mode. A tap does
+   whatever is currently switched on: pronounce it, gloss it, or both at once
+   — the sound is instant and free, the gloss arrives a few seconds later, so
+   together they read as one gesture with two answers. */
+/* Every toolbar button carries an icon and a label. On a narrow screen the
+   labels fold away and the icons remain, so eight buttons fit a phone instead
+   of scrolling off the edge; the title attribute keeps them nameable. */
+function btnLabel(el, icon, text){
+  if (!el) return;
+  el.innerHTML = `<i>${icon}</i><span class="lbl">${esc(text)}</span>`;
+  el.title = text;
+}
+
+function syncModes(quiet){
+  const sb = $('speakBtn'), gb = $('glossBtn');
+  sb.setAttribute('aria-pressed', String(S.speak));
+  sb.classList.toggle('on', S.speak);
+  btnLabel(sb, '🔊', S.speak ? 'النطق مُفعّل' : 'النطق');
+  gb.setAttribute('aria-pressed', String(S.gloss));
+  gb.classList.toggle('on', S.gloss);
+  btnLabel(gb, '📖', S.gloss ? 'الحاشية مُفعّلة' : 'الحاشية');
+  try { localStorage.setItem('hashiya.modes', JSON.stringify({ s: S.speak, g: S.gloss })); } catch(e){}
+  if (quiet) return;
+
+  const msg =
+    S.speak && S.gloss ? 'النقرة الواحدة تعطيك الاثنين: <b>تُنطق الكلمة فوراً</b> ثم تصل حاشيتها بعد ثوانٍ. الحاشية وحدها هي التي تستهلك من رصيدك.'
+  : S.speak           ? 'النطق وحده: انقر أي كلمة لتسمعها بالنطق البريطاني. <b>لا يستهلك رصيداً ولا يحتاج اتصالاً.</b>'
+  : S.gloss           ? 'الحاشية وحدها: انقر كلمة فيُكتب شرحها في الهامش.'
+  :                     'الزران مُطفآن — النقر على الكلمات لن يفعل شيئاً. فعّل أحدهما.';
+  banner(msg, (S.speak || S.gloss) ? '' : 'warn');
+  setTimeout(() => { const el = $('banner'); if (el && !/رصيد|تعذّر/.test(el.textContent)) el.hidden = true; }, 5000);
+}
+
+$('speakBtn').onclick = () => { S.speak = !S.speak; syncModes(); };
+$('glossBtn').onclick = () => { S.gloss = !S.gloss; syncModes(); };
+
+try {
+  const m = JSON.parse(localStorage.getItem('hashiya.modes') || 'null');
+  if (m) { S.speak = !!m.s; S.gloss = m.g !== false; }
+} catch(e){}
+
+/* ============ speak whatever is selected ============ */
+/* Select a syllable, a single letter, or a whole phrase in the book and a
+   small bar appears beside it. This is how syllables and letters get heard:
+   the reader chooses the fragment rather than an algorithm guessing at it. */
+let selBar = null;
+function hideSelBar(){ if (selBar) selBar.hidden = true; }
+
+/* recompute the bar's position from the selection as it stands right now */
+function placeSelBar(){
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !selBar || selBar.hidden) return;
+    const r = sel.getRangeAt(0);
+    const rect = r.getBoundingClientRect ? r.getBoundingClientRect() : null;
+    if (rect && (rect.width || rect.height)) position(rect);
+  } catch(e){}
+}
+
+function position(rect){
+  // On a phone the finger and the two selection handles sit right above the
+  // text, so the bar goes underneath instead of hiding behind them.
+  const gap = isPhone() ? 34 : 8;
+  const top = isPhone()
+    ? rect.bottom + window.scrollY + gap
+    : rect.top + window.scrollY - selBar.offsetHeight - gap;
+  selBar.style.top  = Math.max(window.scrollY + 4, top) + 'px';
+  selBar.style.left = Math.max(6, Math.min(
+    rect.left + window.scrollX + rect.width / 2 - selBar.offsetWidth / 2,
+    document.documentElement.clientWidth - selBar.offsetWidth - 6)) + 'px';
+}
+
+function showSelBar(text, rect){
+  if (!selBar) {
+    selBar = document.createElement('div');
+    selBar.className = 'selbar'; selBar.hidden = true;
+    selBar.innerHTML = '';   // built per selection in showSelBar
+    document.body.appendChild(selBar);
+    selBar.addEventListener('mousedown', e => e.preventDefault());   // keep the selection
+    selBar.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    selBar.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      const t = selBar.dataset.text || '';
+      if (b.dataset.sum) {
+        const t = selBar.dataset.text || '';
+        const s2 = window.getSelection(); if (s2) s2.removeAllRanges();
+        hideSelBar();
+        runSummary(t, 'المقطع المظلَّل');
+        return;
+      }
+      if (b.dataset.gloss) {
+        const node = selBar._anchor;
+        ask(t, contextOf(node), null);
+        const s2 = window.getSelection(); if (s2) s2.removeAllRanges();
+        hideSelBar();
+        return;
+      }
+      say(t, langFor(t, selBar._anchor), +b.dataset.r);
+    });
+  }
+  selBar.dataset.text = text;
+
+  /* What you can usefully do with a selection depends on its size: a phrase
+     wants a gloss, a passage wants a summary. Offering both for everything
+     meant offering a gloss of four hundred words and a summary of two. */
+  const words = text.split(/\s+/).filter(Boolean).length;
+  const short = words <= 12;
+  const long  = words >= 25;               // groundedSummary's own floor
+  selBar.innerHTML =
+      `<button data-r=".85">◂ استمع</button>`
+    + (short ? `<button data-r=".5">◂ ببطء</button>` : '')
+    + (short ? `<button data-gloss="1">حاشية</button>` : '')
+    + (long  ? `<button data-sum="1">لخّص</button>` : '')
+    + (!short && !long ? `<button data-gloss="1">حاشية</button>` : '')
+    + `<span class="selbar-n">${AR(words)} كلمة</span>`;
+
+  selBar.hidden = false;
+  position(rect);
+}
+
+document.addEventListener('selectionchange', () => {
+  try {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return hideSelBar();
+    const text = sel.toString().trim();
+    const anchor = sel.anchorNode;
+    const host = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+    // The old cap was 160 characters, from when this bar only spoke words.
+    // It now carries "summarise", which is *for* long passages — the cap was
+    // hiding the bar exactly when the reader most needed it. What remains is
+    // a sanity limit, not a feature limit.
+    if (!text || text.length > 20000 || !host || !host.closest('#reader')) return hideSelBar();
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect ? range.getBoundingClientRect() : null;
+    showSelBar(text, rect || host.getBoundingClientRect());
+    selBar._anchor = host;
+  } catch(e){ /* a selection quirk must never break reading */ }
+});
+/* This used to hide the bar on any scroll — and Android scrolls the page a
+   little while you drag the selection handles, so on a phone the bar vanished
+   the instant it appeared. A live selection now keeps its bar and the bar
+   simply follows it. */
+window.addEventListener('scroll', () => {
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.toString().trim()) placeSelBar();
+  else hideSelBar();
+}, { passive: true });
+
+/* Android fires selectionchange while the handles are still moving; this
+   re-checks once the finger is up so the bar lands in its final place. */
+document.addEventListener('touchend', () => setTimeout(() =>
+  document.dispatchEvent(new Event('selectionchange')), 140), { passive: true });
+
+/* ============ gloss engine ============ */
+$('reader').addEventListener('click', e => {
+  if (e.target.dataset && e.target.dataset.ocr) return;
+  const sel = window.getSelection();
+  // A live selection belongs to the selection bar: it offers listening *and*
+  // a gloss. Grabbing it here used to fire a gloss and wipe the selection,
+  // so the listen bar flashed and vanished before it could be used.
+  if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+  const tok = e.target.closest('.tok');
+  if (!tok) return;
+  const word = tokWord(tok);
+  S.lastWord = word;
+  if (!S.speak && !S.gloss) { syncModes(); return; }
+  // sound first: it is local and instant, so it lands while the gloss travels
+  if (S.speak) {
+    document.querySelectorAll('.tok.active').forEach(t => t.classList.remove('active'));
+    tok.classList.add('active');
+    say(word, langFor(word, tok));
+  }
+  if (S.gloss) ask(word, contextOf(tok), tok);
+});
+function contextOf(node){
+  const p = node && node.closest ? node.closest('p') : null;
+  // markers must be stripped: they change the paragraph after every gloss,
+  // which would change the cache key and buy the same answer twice
+  const t = cleanText(p);
+  return t.length > 700 ? t.slice(0, 700) : t;
+}
+
+/* ============ the gloss popover ============ */
+/* The gloss used to live in a column that stood there whether you wanted it
+   or not, taking a quarter of the page away from the book. It now appears
+   beside the word you touched and leaves when you carry on reading. Every
+   gloss is still filed in the margin drawer, so nothing is lost by closing. */
+let pop = null, popFor = null;
+
+function hidePop(){
+  if (pop) { pop.hidden = true; popFor = null; }
+}
+
+function popMarkup(g){
+  if (g.status === 'loading')
+    return `<div class="pop-term">${esc(g.term)}</div>
+            <div class="pending"><span class="dot"></span><span class="dot"></span><span class="dot"></span> تُكتب الحاشية…</div>`;
+  if (g.status === 'error')
+    return `<div class="pop-term">${esc(g.term)}</div><div class="err">${g.hint ? g.gloss : esc(g.gloss)}</div>`;
+
+  const saved = inLex(g.term);
+  return `<div class="pop-head">
+      <span class="pop-term ${isLatin(g.term) ? '' : 'ar'}" dir="${dirOf(g.term)}">${esc(g.term)}</span>
+      ${g.cached ? '<span class="pop-kept" title="من المحفوظ — بلا تكلفة">محفوظة</span>' : ''}
+      <button class="pop-x" data-close="1" aria-label="إغلاق">×</button>
+    </div>
+    <div class="row">
+      ${g.translit ? `<span class="translit">${esc(g.translit)}</span>` : ''}
+      ${g.ipa ? `<span class="ipa">${esc(g.ipa)}</span>` : ''}
+      ${g.syllables ? `<span class="syl">${esc(g.syllables)}</span>` : ''}
+    </div>
+    <div class="row">
+      <button class="say" data-say="${esc(g.speak || g.term)}" data-lang="${esc(g.speak_lang || 'en-GB')}">◂ استمع</button>
+      <button class="say slow" data-say="${esc(g.speak || g.term)}" data-lang="${esc(g.speak_lang || 'en-GB')}" data-rate=".55">◂ ببطء</button>
+    </div>
+    ${g.equivalent ? `<div class="eq">${esc(g.equivalent)}</div>` : ''}
+    <div class="body-ar">${esc(g.gloss)}</div>
+    ${g.etymology ? `<div class="meta"><i>الاشتقاق:</i> ${esc(g.etymology)}</div>` : ''}
+    ${g.note ? `<div class="meta"><i>تنبيه:</i> ${esc(g.note)}</div>` : ''}
+    <div class="chips">
+      ${g.field ? `<span class="chip">${esc(g.field)}</span>` : ''}
+      <button class="keep ${saved ? 'on' : ''}" data-keep="${esc(g.term)}">${saved ? '✓ في المعجم' : '+ احفظ'}</button>
+    </div>`;
+}
+
+function showPop(g, tok){
+  if (!g) return;
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.className = 'pop'; pop.hidden = true;
+    document.body.appendChild(pop);
+    pop.addEventListener('mousedown', e => e.stopPropagation());
+    pop.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.close) return hidePop();
+      if (b.dataset.say) return say(b.dataset.say, b.dataset.lang, b.dataset.rate ? +b.dataset.rate : undefined);
+      if (b.dataset.keep) { toggleLex(b.dataset.keep); showPop(g, tok); }
+    });
+  }
+  pop.innerHTML = popMarkup(g);
+  pop.hidden = false;
+  popFor = tok || popFor;
+  placePop();
+}
+
+function placePop(){
+  if (!pop || pop.hidden || !popFor) return;
+  const r = popFor.getBoundingClientRect();
+  if (!r || (!r.width && !r.height)) return hidePop();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  const vw = document.documentElement.clientWidth;
+  const vh = window.innerHeight;
+
+  // below the word when there is room beneath it, above it otherwise
+  const below = r.bottom + 10 + ph < vh || r.top - 10 - ph < 0;
+  const top = below ? r.bottom + 10 : r.top - 10 - ph;
+  pop.style.top  = (top + window.scrollY) + 'px';
+  pop.style.left = Math.max(8, Math.min(r.left + r.width / 2 - pw / 2, vw - pw - 8)) + window.scrollX + 'px';
+  pop.classList.toggle('above', !below);
+}
+
+document.addEventListener('mousedown', e => {
+  if (!pop || pop.hidden) return;
+  // e.target is not always an Element — a text node or the document itself
+  // has no closest(), and the exception would have killed the handler.
+  const el = e.target && e.target.nodeType === 1 ? e.target
+           : (e.target && e.target.parentElement) || null;
+  if (!el || (!el.closest('.pop') && !el.closest('.tok'))) hidePop();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { hidePop(); openDrawer(false); } });
+window.addEventListener('scroll', () => {
+  if (!pop || pop.hidden) return;
+  const r = popFor && popFor.getBoundingClientRect();
+  // let it ride along while the word is on screen, and leave once it is not
+  if (!r || r.bottom < 0 || r.top > window.innerHeight) hidePop(); else placePop();
+}, { passive: true });
+window.addEventListener('resize', placePop, { passive: true });
+
+/* A gloss is expensive to make and identical every time for the same word in
+   the same paragraph, so it is kept. The key carries the paragraph with it:
+   the prompt asks for the meaning *in this passage*, so the same word in a
+   different passage is a different question and is asked again. */
+function glossKey(term, context){
+  const t = String(term).toLowerCase().trim();
+  const c = String(context || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  let h = 5381;
+  for (let i = 0; i < c.length; i++) h = ((h * 33) ^ c.charCodeAt(i)) >>> 0;
+  return 'g:' + t + ':' + h.toString(36);
+}
+
+async function cachedGloss(key){
+  if (S.cache.has(key)) return S.cache.get(key);
+  const v = await sget(key);
+  if (v && v.term) { S.cache.set(key, v); return v; }
+  return null;
+}
+async function keepGloss(key, entry){
+  const lean = { term: entry.term, ipa: entry.ipa || '', translit: entry.translit || '',
+                 syllables: entry.syllables || '', equivalent: entry.equivalent || '',
+                 gloss: entry.gloss || '', etymology: entry.etymology || '',
+                 field: entry.field || '', note: entry.note || '',
+                 lang: entry.lang || '', speak: entry.speak || '', speak_lang: entry.speak_lang || 'en-GB' };
+  S.cache.set(key, lean);
+  await sset(key, lean);
+}
+
+async function ask(term, context, tok){
+  term = term.replace(/\s+/g,' ').trim(); if (!term) return;
+  S.tab = 'gloss'; syncTabs();
+  // the popover carries the answer now; the drawer stays out of the way
+  document.querySelectorAll('.tok.active').forEach(t => t.classList.remove('active'));
+  if (tok) tok.classList.add('active');
+
+  const key = glossKey(term, context);
+  const hit = await cachedGloss(key);
+  if (hit) {
+    const e = Object.assign({}, hit, { idx: ++S.n, status: 'done', cached: true });
+    S.glosses.unshift(e); renderMargin(); showPop(e, tok);
+    if (tok && !tok.querySelector('.marker')) {
+      const m = document.createElement('sup'); m.className = 'marker'; m.textContent = AR(e.idx); tok.appendChild(m);
+    }
+    return;
+  }
+
+  const idx = ++S.n;
+  if (tok && !tok.querySelector('.marker')) {
+    const m = document.createElement('sup'); m.className = 'marker'; m.textContent = AR(idx); tok.appendChild(m);
+  }
+  const entry = { idx, term, status: 'loading' };
+  S.glosses.unshift(entry); renderMargin(); showPop(entry, tok);
+
+  const prompt = `أنت معجم سياقي يخدم باحثاً في العلوم الإنسانية يقرأ نصوصاً فلسفية واجتماعية بالعربية والإنجليزية والفرنسية.
+حدّد أولاً لسان المصطلح من الفقرة المحيطة به: قد تكون الفقرة فرنسية والمصطلح فرنسياً وإن بدا شبيهاً بكلمة إنجليزية.
+
+المصطلح المطلوب: «${term}»
+الفقرة الواردة فيها: «${context}»
+
+أعد كائن JSON فقط، بلا أي نص خارجه وبلا Markdown، بهذه المفاتيح:
+{
+ "term": المصطلح كما هو،
+ "lang": لسان المصطلح نفسه كما ورد في هذه الفقرة: "en" أو "fr" أو "ar"،
+ "ipa": النسخ الصوتي الدولي بين شرطتين مائلتين. إن كان المصطلح إنجليزياً فبالنطق **البريطاني المعياري (Received Pronunciation)** لا الأمريكي. وإن كان فرنسياً فبالنطق **الفرنسي المعياري**. وإن كان عربياً فاجعله ""،
+ "syllables": الكلمة مقسّمة مقاطعَ بشرطات مع إبراز المقطع المنبور بحروف كبيرة (مثال: cognitive ← COG-ni-tive)، وإلا ""،
+ "translit": تقريب النطق بالحروف العربية المشكولة مبنيّاً على **لسان المصطلح نفسه**: الإنجليزي بالنطق البريطاني (schedule ← شِدْيُول لا سْكِجُول)، والفرنسي بالنطق الفرنسي (société ← سُوسْيِيتِي، وbeaucoup ← بُوكُو) — هذا أهم حقل فاحرص على دقته، وإن كان المصطلح عربياً فاجعله ""،
+ "equivalent": المقابل العربي المستقر في الأدبيات إن كان أجنبياً، أو المقابل الإنجليزي إن كان عربياً،
+ "gloss": شرح سياقي بالعربية الفصحى في جملتين على الأكثر، مرتبط بمعناه في هذه الفقرة تحديداً لا بمعناه المعجمي العام،
+ "etymology": الأصل الاشتقاقي بإيجاز (الجذر اللاتيني/اليوناني، أو الجذر العربي والوزن)،
+ "field": الحقل المعرفي أو التقليد الفكري الذي ينتمي إليه الاستعمال هنا،
+ "note": فرق دلالي أو التباس شائع يستحق التنبيه، أو ""،
+ "speak": الصيغة التي تُنطق بلغتها الأصلية،
+ "speak_lang": "en-GB" للإنجليزي، أو "fr-FR" للفرنسي، أو "ar-SA" للعربي — بحسب لسان المصطلح لا لغة الشرح
+}`;
+  try {
+    const raw = (await callClaude([{ role:"user", content: prompt }])).replace(/```json|```/g,'').trim();
+    Object.assign(entry, JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}')+1)), { status:'done' });
+    await keepGloss(key, entry);
+  } catch(err){
+    entry.status = 'error';
+    if (err instanceof NoKey) {
+      entry.gloss = 'أدخل مفتاح الواجهة من الإعدادات (⚙︎) ثم انقر الكلمة مرة أخرى.';
+      entry.hint = true;
+    } else if (isAccountError(err.message)) {
+      // said once, above the page, instead of once per clicked word
+      banner(apiHint(err.message), 'bad');
+      entry.gloss = 'تعذّرت — انظر التنبيه أعلى الصفحة.';
+      entry.hint = false; entry.raw = '';
+    } else {
+      const h = apiHint(err.message);
+      entry.gloss = h || ('تعذّر جلب الحاشية: ' + (err.message || 'خطأ في الاتصال'));
+      entry.hint = !!h;
+      entry.raw  = h ? (err.message || '') : '';
+    }
+  }
+  renderMargin();
+  showPop(entry, tok);
+}
+
+/* ============ flag terms (visible pages) ============ */
+$('flagBtn').onclick = async () => {
+  const b = $('flagBtn'); b.disabled = true; btnLabel(b, '⚑', 'جارٍ الترشيح…');
+  const text = visibleText(7000);
+  try {
+    const raw = (await callClaude([{ role:"user", content:
+`استخرج من النص التالي المصطلحات الاصطلاحية والمفاهيم النظرية والألفاظ الأجنبية التي تحتاج شرحاً لقارئ متخصص في العلوم الإنسانية. تجاهل الكلمات العادية.
+أعد مصفوفة JSON من السلاسل فقط، كل عنصر منسوخ حرفياً كما ورد، بحد أقصى ٢٥ عنصراً، بلا نص خارج المصفوفة.
+
+${text}` }])).replace(/```json|```/g,'').trim();
+    const terms = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']')+1));
+    const words = new Set();
+    terms.forEach(t => String(t).split(/\s+/).forEach(w => words.add(w.replace(/[()،.,:؛]/g,'').toLowerCase())));
+    document.querySelectorAll('#reader .tok').forEach(t => {
+      if (words.has(tokWord(t).toLowerCase())) t.classList.add('flagged');
+    });
+    btnLabel(b, '⚑', `رُشّح ${AR(terms.length)}`);
+  } catch(e){ btnLabel(b, '⚑', 'تعذّر الترشيح'); }
+  setTimeout(()=>{ b.disabled=false; btnLabel(b, '⚑', 'ترشيح المصطلحات'); }, 2600);
+};
+
+/* ==========================================================================
+   GROUNDED SUMMARY
+   --------------------------------------------------------------------------
+   Telling a model not to invent things is a promise, not a guarantee. So each
+   point of the summary must arrive carrying a verbatim quotation from the
+   passage, and this code then goes and looks for that quotation in the source
+   text. A point whose evidence is not actually there is marked as such before
+   you ever read it. The check is a string search, not a second opinion.
+   ========================================================================== */
+
+/* Normalising for comparison, not for display: Arabic writes the same word
+   with or without diacritics and with several shapes of alef, and a quotation
+   copied by a model often differs from the page in exactly those ways. */
+function normForMatch(t){
+  return String(t || '')
+    .replace(/[ً-ْـٰ]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/[ىئ]/g, 'ي')
+    .replace(/ؤ/g, 'و').replace(/ة/g, 'ه')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{Nd}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* Is this quotation really in that text? Exact first; then a tolerant pass,
+   because a transcription may carry a line-break artefact the model smoothed
+   over. Anything shorter than three words proves nothing and is refused. */
+function quoteFound(quote, source){
+  const q = normForMatch(quote), src = normForMatch(source);
+  if (!q || q.split(' ').length < 3) return false;
+  if (src.includes(q)) return 'exact';
+  const qw = q.split(' '), sw = src.split(' ');
+  for (let i = 0; i < sw.length; i++) {
+    if (sw[i] !== qw[0]) continue;
+    const win = sw.slice(i, i + qw.length + 4);
+    let hit = 0, j = 0;
+    for (const w of qw) { const k = win.indexOf(w, j); if (k >= 0) { hit++; j = k + 1; } }
+    if (hit / qw.length >= 0.85) return 'near';
+  }
+  return false;
+}
+
+const SUM_RULES = [
+ 'أنت تلخّص لباحث في العلوم الإنسانية، ولا تعرف من هذا الكتاب إلا المقطع المعطى لك.',
+ '',
+ 'قواعد ملزمة:',
+ '1. لا تستعمل أي معرفة من خارج المقطع. إن لم يذكر المقطع شيئاً فلا تذكره أنت، ولو كنت تعرفه.',
+ '2. كل نقطة تكتبها يجب أن تحمل معها شاهداً منقولاً حرفياً من المقطع، بلا تغيير حرف واحد. لا تُعِد صياغة الشاهد ولا تختصره بنقاط.',
+ '3. الشاهد جملة أو شطر جملة من ست كلمات فأكثر، منسوخ كما هو.',
+ '4. إن لم تجد شاهداً حرفياً لنقطة، فاحذف النقطة. نقطة بلا شاهد لا تُكتب.',
+ '5. لا تستنتج ما لم يقله النص صراحةً. وما بدا لك لازماً غير مصرّح به، ضعه في unclear لا في points.',
+ '6. الخلاصة بالعربية الفصحى الأكاديمية، والشواهد تبقى بلغتها الأصلية كما وردت.',
+ '',
+ 'أعد كائن JSON فقط، بلا نص خارجه وبلا Markdown:',
+ '{',
+ ' "thesis": "الأطروحة المركزية في جملتين على الأكثر، مبنية على المقطع وحده",',
+ ' "points": [ {"claim":"النقطة بالعربية", "quote":"الشاهد الحرفي من المقطع"} ],',
+ ' "unclear": ["ما بقي ملتبساً أو غير مبرهن في المقطع"],',
+ ' "terms": ["المفاهيم المفتاحية كما وردت حرفياً"]',
+ '}',
+ 'اجعل النقاط بين ثلاث وسبع.'
+].join('\n');
+
+async function groundedSummary(text, label){
+  const src = String(text || '').trim();
+  if (src.split(/\s+/).length < 25)
+    return { error: 'المقطع أقصر من أن يُلخَّص. ظلّل فقرة أو أكثر.' };
+
+  const raw = await callClaude([{ role: 'user', content:
+    SUM_RULES + '\n\nالمقطع (وهو كل ما تعرفه):\n<<<\n' + src.slice(0, 14000) + '\n>>>' }],
+    2000, { temperature: 0 });
+
+  let j;
+  try {
+    const t = String(raw).replace(/```json|```/g, '');
+    j = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
+  } catch(e){ return { error: 'تعذّرت قراءة الخلاصة. أعد المحاولة.' }; }
+
+  const points = (j.points || []).map(p => {
+    const found = quoteFound(p.quote, src);
+    return { claim: String(p.claim || ''), quote: String(p.quote || ''),
+             ok: !!found, how: found || 'none' };
+  });
+  return {
+    label: label || '', thesis: String(j.thesis || ''), points,
+    unclear: (j.unclear || []).map(String).slice(0, 4),
+    terms: (j.terms || []).map(String).slice(0, 8),
+    checked: points.length, unverified: points.filter(p => !p.ok).length,
+    words: src.split(/\s+/).length
+  };
+}
+
+async function runSummary(text, label){
+  hidePop();
+  S.tab = 'sum'; syncTabs(); S.summary = '…'; renderMargin(); openDrawer(true);
+  try {
+    const key = 'sum:' + normForMatch(text).slice(0, 90) + ':' + String(text).length;
+    let r = S.cache.get(key) || await sget(key);
+    if (!r) { r = await groundedSummary(text, label);
+              if (!r.error) { S.cache.set(key, r); await sset(key, r); } }
+    else r = Object.assign({}, r, { cached: true });
+    S.summary = r;
+  } catch(e){
+    if (isAccountError(e.message)) banner(apiHint(e.message), 'bad');
+    S.summary = { error: e instanceof NoKey ? 'أدخل مفتاح الواجهة من الإعدادات (⚙︎).'
+                : (apiHint(e.message) || 'تعذّرت الخلاصة: ' + (e.message || '')).replace(/<[^>]+>/g, '') };
+  }
+  renderMargin();
+}
+
+function summaryMarkup(r){
+  if (typeof r === 'string')
+    return r === '…'
+      ? '<div class="pending"><span class="dot"></span><span class="dot"></span><span class="dot"></span> تُقرأ الفقرات وتُوزن الشواهد…</div>'
+      : '<div class="summary">' + esc(r) + '</div>';
+  if (r.error) return '<div class="err">' + esc(r.error) + '</div>';
+
+  const chip = r.unverified === 0
+    ? '<span class="verdict good">كل النقاط لها شواهد في النص</span>'
+    : '<span class="verdict warn">' + AR(r.unverified) + ' من ' + AR(r.checked) + ' بلا شاهد</span>';
+
+  return '<div class="sum">'
+    + '<div class="sum-head">' + (r.label ? '<b>' + esc(r.label) + '</b> · ' : '')
+    + AR(r.words) + ' كلمة ' + chip
+    + (r.cached ? ' <span class="pop-kept">محفوظة</span>' : '') + '</div>'
+    + (r.thesis ? '<div class="thesis">' + esc(r.thesis) + '</div>' : '')
+    + '<ol class="pts">' + r.points.map(p =>
+        '<li class="' + (p.ok ? '' : 'noproof') + '">'
+        + '<div class="claim">' + esc(p.claim)
+        + (p.ok ? '' : ' <span class="tag">بلا شاهد</span>') + '</div>'
+        + (p.quote ? '<blockquote dir="' + dirOf(p.quote) + '">' + esc(p.quote) + '</blockquote>' : '')
+        + '</li>').join('') + '</ol>'
+    + (r.unclear.length ? '<div class="sub">ما بقي ملتبساً</div><ul class="pts">'
+        + r.unclear.map(u => '<li>' + esc(u) + '</li>').join('') + '</ul>' : '')
+    + (r.terms.length ? '<div class="chips">' + r.terms.map(t =>
+        '<span class="chip" dir="' + dirOf(t) + '">' + esc(t) + '</span>').join('') + '</div>' : '')
+    + '</div>';
+}
+
+/* ============ summary of what's on screen ============ */
+$('sumBtn').onclick = async () => {
+  const sel = selectedText();
+  const b = $('sumBtn'); b.disabled = true; btnLabel(b, '✦', 'تُكتب…');
+  // a live selection is what you meant; otherwise the paragraphs on screen
+  await runSummary(sel || visibleText(9000), sel ? 'المقطع المظلَّل' : 'الفقرات المعروضة');
+  b.disabled = false; btnLabel(b, '✦', 'خلاصة المقطع');
+};
+
+function visibleText(cap){
+  const ps = [...document.querySelectorAll('#reader p')];
+  const vis = ps.filter(p => { const r = p.getBoundingClientRect(); return r.bottom > -600 && r.top < innerHeight + 600; });
+  const use = vis.length ? vis : ps.slice(0, 12);
+  return use.map(p => cleanText(p)).join('\n\n').slice(0, cap);
+}
+
+/* ============ lexicon ============ */
+async function loadLex(){ S.lexicon = (await sget('lexicon')) || []; syncCounter(); }
+async function saveLex(){ await sset('lexicon', S.lexicon); syncCounter(); }
+const inLex = t => S.lexicon.some(l => l.term === t);
+function toggleLex(term){
+  const g = S.glosses.find(x => x.term === term); if (!g) return;
+  if (inLex(term)) S.lexicon = S.lexicon.filter(l => l.term !== term);
+  else S.lexicon.unshift({ term:g.term, translit:g.translit||'', ipa:g.ipa||'', equivalent:g.equivalent||'',
+                           gloss:g.gloss||'', etymology:g.etymology||'', at:new Date().toISOString().slice(0,10) });
+  saveLex(); renderMargin();
+}
+function syncCounter(){
+  $('counter').textContent = S.lexicon.length ? `${AR(S.lexicon.length)} في المعجم` : '';
+  // on a file:// page nothing survives the browser closing, so the way out
+  // of the app must stay visible the moment there is anything worth saving
+  $('exportBtn').hidden = !S.lexicon.length;
+  if (S.lexicon.length && location.protocol === 'file:') $('exportBtn').classList.add('urgent');
+}
+$('exportBtn').onclick = () => {
+  const md = '# معجمي الشخصي\n\n' + S.lexicon.map(l =>
+    `## ${l.term}\n- النطق: ${l.translit} ${l.ipa}\n- المقابل: ${l.equivalent}\n- الشرح: ${l.gloss}\n- الاشتقاق: ${l.etymology}\n- ${l.at}\n`).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([md], { type:'text/markdown;charset=utf-8' }));
+  a.download = 'معجمي.md'; a.click();
+};
+
+/* ============ speech: British by preference ============ */
+/* getVoices() is empty on the first call in most browsers and fills in later,
+   which is why the old code sometimes said nothing at all the first time. We
+   listen for the list arriving instead of asking once and hoping. */
+let VOICES = [];
+let voicesReady = false;
+
+function loadVoices(){
+  try { VOICES = speechSynthesis.getVoices() || []; } catch(e){ VOICES = []; }
+  if (VOICES.length) voicesReady = true;
+  fillVoiceMenu();
+}
+const britishVoices = () => VOICES.filter(v => /^en[-_]GB/i.test(v.lang));
+const norm2 = l => String(l || 'en').slice(0,2).toLowerCase();
+
+/* Order of preference for English: the voice the reader picked, then any
+   en-GB voice, then any English voice at all. */
+function pickVoice(lang){
+  const two = norm2(lang);
+  if (two === 'en' || two === 'fr') {
+    // a hand-picked voice applies only to the tongue it actually belongs to
+    if (CFG.voice) {
+      const chosen = VOICES.find(v => v.voiceURI === CFG.voice || v.name === CFG.voice);
+      if (chosen && norm2(chosen.lang) === two) return chosen;
+    }
+    if (two === 'fr') {
+      const frv = VOICES.filter(v => /^fr/i.test(v.lang));
+      if (frv.length) return frv.find(v => /natural|online|premium|enhanced/i.test(v.name)) || frv[0];
+      return VOICES.find(v => /^en/i.test(v.lang)) || null;
+    }
+    const gb = britishVoices();
+    if (gb.length) {
+      // a natural/online voice beats a clipped local one when both exist
+      return gb.find(v => /natural|online|premium|enhanced/i.test(v.name)) || gb[0];
+    }
+    return VOICES.find(v => /^en/i.test(v.lang)) || null;
+  }
+  return VOICES.find(v => norm2(v.lang) === two) || null;
+}
+
+function say(text, lang, rate){
+  if (!text) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text));
+    const two = norm2(lang);
+    const v = pickVoice(lang);
+    u.voice = v || null;
+    u.lang  = v ? v.lang : (lang || 'en-GB');
+    u.rate  = rate || CFG.rate || .85;
+    speechSynthesis.speak(u);
+  } catch(e){ console.warn('speech', e); }
+}
+
+/* what the settings dialog shows about the voices actually installed */
+function fillVoiceMenu(){
+  const sel = $('voiceInput'); if (!sel) return;
+  const gb = britishVoices();
+  const fr = VOICES.filter(v => /^fr/i.test(v.lang));
+  const en = VOICES.filter(v => /^(en|fr)/i.test(v.lang));
+  sel.innerHTML =
+    `<option value="">تلقائي — بريطاني للإنجليزية وفرنسي للفرنسية</option>` +
+    en.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} — ${esc(v.lang)}` +
+                `${/^en[-_]GB/i.test(v.lang) ? ' ★' : ''}</option>`).join('');
+  sel.value = CFG.voice || '';
+
+  const note = $('voiceNote'); if (!note) return;
+  const frNote = fr.length
+    ? ` ووُجد ${AR(fr.length)} صوت فرنسي.`
+    : ' <b>ولا صوت فرنسي</b> — الفرنسية ستُنطق بصوت إنجليزي حتى تنصّب حزمة كلام فرنسية.';
+  if (!VOICES.length) {
+    note.className = 'hint keystate warn';
+    note.innerHTML = 'لم يعثر المتصفح على أي صوت بعد. أغلق النافذة وافتحها ثانية.';
+  } else if (gb.length) {
+    note.className = 'hint keystate';
+    note.className = 'hint keystate' + (fr.length ? '' : ' warn');
+    note.innerHTML = `وُجد ${AR(gb.length)} صوت بريطاني (المعلّمة بـ★).` + frNote;
+  } else {
+    note.className = 'hint keystate warn';
+    note.innerHTML = '<b>لا يوجد صوت بريطاني على هذا الجهاز</b> — سيُنطق بلكنة أمريكية. '
+      + 'على ويندوز: الإعدادات ← الوقت واللغة ← اللغة والمنطقة ← أضف <b>English (United Kingdom)</b>، '
+      + 'وفي خياراتها نصّب حزمة <b>الكلام (Speech)</b>، ثم أعد تشغيل المتصفح.' + frNote;
+  }
+}
+
+/* Started only now that every helper above exists — and wrapped, because a
+   speech engine that lacks addEventListener (older Safari exposes only
+   onvoiceschanged) must not be allowed to abort the script and kill the app,
+   the way the missing pdf.js once did. */
+if ('speechSynthesis' in window) {
+  try {
+    loadVoices();
+    if (typeof speechSynthesis.addEventListener === 'function')
+      speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    else
+      speechSynthesis.onvoiceschanged = loadVoices;
+    setTimeout(loadVoices, 400);    // Safari never fires the event at all
+  } catch(e){ console.warn('voices', e); }
+}
+
+/* ============ margin render ============ */
+$('tabGloss').onclick = () => { S.tab='gloss'; syncTabs(); renderMargin(); };
+$('tabLex').onclick = () => { S.tab='lex'; syncTabs(); renderMargin(); };
+$('tabSum').onclick = () => { S.tab='sum'; syncTabs(); renderMargin(); };
+function syncTabs(){
+  $('tabGloss').setAttribute('aria-selected', S.tab==='gloss');
+  $('tabLex').setAttribute('aria-selected', S.tab==='lex');
+  $('tabSum').setAttribute('aria-selected', S.tab==='sum');
+}
+
+function renderMargin(){
+  const box = $('marginBody');
+
+  if (S.tab === 'sum') {
+    box.innerHTML = S.summary
+      ? summaryMarkup(S.summary)
+      : `<div class="empty"><b>لا خلاصة بعد.</b>ظلّل مقطعاً واضغط «لخّص»، أو اضغط ✦ فتُلخَّص الفقرات المعروضة. كل نقطة تأتي بشاهدها المنقول من النص، وما لا شاهد له يُوسم.</div>`;
+    return;
+  }
+
+  if (S.tab === 'lex') {
+    box.innerHTML = S.lexicon.length ? S.lexicon.map(l => `
+      <div class="lex"><button class="x" data-drop="${esc(l.term)}" aria-label="حذف">×</button>
+        <b dir="${dirOf(l.term)}" class="${isLatin(l.term)?'':'ar'}">${esc(l.term)}</b>
+        ${l.translit ? ` <span class="translit">${esc(l.translit)}</span>` : ''}
+        <p>${esc(l.equivalent)}${l.equivalent && l.gloss ? ' — ' : ''}${esc(l.gloss)}</p></div>`).join('')
+      : `<div class="empty"><b>المعجم فارغ.</b>احفظ ما تريد الرجوع إليه من الحواشي، ثم صدّره ملفاً حين تحتاجه في كتابتك.</div>`;
+    box.querySelectorAll('[data-drop]').forEach(b => b.onclick = () => {
+      S.lexicon = S.lexicon.filter(l => l.term !== b.dataset.drop); saveLex(); renderMargin();
+    });
+    return;
+  }
+
+  if (!S.glosses.length) {
+    box.innerHTML = `<div class="empty"><b>لا حاشية بعد.</b>انقر كلمة في النص، أو ظلّل مصطلحاً من كلمتين فأكثر ثم انقره — فالمفاهيم المركّبة تُقرأ وحدةً واحدة.</div>`;
+    return;
+  }
+
+  box.innerHTML = S.glosses.map(g => {
+    if (g.status === 'loading')
+      return `<div class="gloss"><span class="gloss-idx">${AR(g.idx)}</span>
+        <span class="term ${isLatin(g.term)?'':'ar'}">${esc(g.term)}</span>
+        <div class="pending"><span class="dot"></span><span class="dot"></span><span class="dot"></span> تُكتب الحاشية…</div></div>`;
+    if (g.status === 'error')
+      // g.hint marks one of our own strings, which may carry a link; anything
+      // that came from the API is escaped, never inlined as markup.
+      return `<div class="gloss"><span class="gloss-idx">${AR(g.idx)}</span>
+        <span class="term ${isLatin(g.term)?'':'ar'}">${esc(g.term)}</span>
+        <div class="err">${g.hint ? g.gloss : esc(g.gloss)}</div>
+        ${g.raw ? `<div class="meta"><i>نص الخطأ:</i> ${esc(g.raw)}</div>` : ''}</div>`;
+    const saved = inLex(g.term);
+    return `<div class="gloss">
+      <span class="gloss-idx">${AR(g.idx)}</span>
+      <span class="term ${isLatin(g.term)?'':'ar'}">${esc(g.term)}</span>
+      <div class="row">
+        ${g.translit ? `<span class="translit">${esc(g.translit)}</span>` : ''}
+        ${g.ipa ? `<span class="ipa">${esc(g.ipa)}</span>` : ''}
+        ${g.syllables ? `<span class="syl">${esc(g.syllables)}</span>` : ''}
+        <button class="say" data-say="${esc(g.speak || g.term)}" data-lang="${esc(g.speak_lang || 'en-GB')}">◂ استمع</button>
+        <button class="say slow" data-say="${esc(g.speak || g.term)}" data-lang="${esc(g.speak_lang || 'en-GB')}" data-rate=".55" title="نطق بطيء">◂ ببطء</button>
+      </div>
+      ${g.equivalent ? `<div class="eq">${esc(g.equivalent)}</div>` : ''}
+      <div class="body-ar">${esc(g.gloss)}</div>
+      ${g.etymology ? `<div class="meta"><i>الاشتقاق:</i> ${esc(g.etymology)}</div>` : ''}
+      ${g.note ? `<div class="meta"><i>تنبيه:</i> ${esc(g.note)}</div>` : ''}
+      <div class="chips">${g.field ? `<span class="chip">${esc(g.field)}</span>` : ''}
+        <button class="keep ${saved?'on':''}" data-keep="${esc(g.term)}">${saved?'✓ في المعجم':'+ احفظ'}</button></div>
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('[data-say]').forEach(b => b.onclick = () =>
+    say(b.dataset.say, b.dataset.lang, b.dataset.rate ? +b.dataset.rate : undefined));
+  box.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => toggleLex(b.dataset.keep));
+}
+
+/* ============ installing to the home screen ============
+   Chrome will offer to install a page like this one, but it buries the offer
+   in the ⋮ menu where nobody finds it. The browser announces its willingness
+   through beforeinstallprompt; catching that event lets the offer become a
+   visible button, and one tap then opens Android's own install dialog. */
+let installEvent = null;
+const showInstall = on => { const b = $('installBtn'); if (b) b.hidden = !on; };
+
+const isInstalled = () => {
+  try {
+    return window.matchMedia('(display-mode: standalone)').matches
+        || window.matchMedia('(display-mode: minimal-ui)').matches
+        || window.navigator.standalone === true;
+  } catch(e){ return false; }
+};
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();          // keep it; we fire it from our own button
+  installEvent = e;
+  showInstall(true);
+  let asked = null;
+  try { asked = localStorage.getItem('hashiya.installAsked'); } catch(e){}
+  if (!asked) {
+    banner('يمكنك <b>تثبيت الحاشية على شاشتك الرئيسية</b> فتفتحها بأيقونتها كأي تطبيق، '
+         + 'وتعمل دون اتصال. اضغط <b>⤓ ثبّت التطبيق</b> في الشريط.', '');
+    try { localStorage.setItem('hashiya.installAsked', '1'); } catch(e){}
+    setTimeout(() => { const el = $('banner'); if (el && /ثبّت/.test(el.textContent)) el.hidden = true; }, 9000);
+  }
+});
+
+window.addEventListener('appinstalled', () => {
+  installEvent = null; showInstall(false);
+  banner('تمّ التثبيت. ستجد <b>الحاشية</b> بين تطبيقاتك — افتحها من أيقونتها من الآن.', '');
+  setTimeout(() => { const el = $('banner'); if (el) el.hidden = true; }, 6000);
+});
+
+/* When the button cannot work, say why rather than doing nothing. */
+function explainInstall(){
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  if (isInstalled())
+    return banner('التطبيق مثبّت على هذا الجهاز بالفعل — أنت تستعمله من أيقونته الآن.', '');
+  if (location.protocol === 'file:')
+    return banner('<b>لا يمكن التثبيت من ملف على القرص.</b> التثبيت يحتاج رابطاً على الإنترنت '
+                + '(أو <code>http://localhost</code>). افتح التطبيق من رابطه المنشور ثم أعد المحاولة.', 'bad');
+  if (ios)
+    return banner('على آيفون: زر <b>المشاركة</b> في أسفل سفاري ← <b>إضافة إلى الشاشة الرئيسية</b>.', '');
+  banner('لم يعرض المتصفح نافذة التثبيت بعد. جرّب قائمة المتصفح (⋮) ← <b>تثبيت التطبيق</b>، '
+       + 'أو أعد تحميل الصفحة وانتظر لحظة ثم أعد المحاولة.', 'warn');
+}
+
+$('installBtn').onclick = async () => {
+  if (!installEvent) return explainInstall();
+  const b = $('installBtn'); b.disabled = true;
+  try {
+    installEvent.prompt();
+    const res = await installEvent.userChoice;
+    if (res && res.outcome === 'accepted') showInstall(false);
+  } catch(e){ explainInstall(); }
+  installEvent = null; b.disabled = false;
+};
+
+/* The button also appears where beforeinstallprompt never fires — iOS, or a
+   Chrome that fired it before this script attached — so the offer is never
+   silently missing. */
+function primeInstall(){
+  if (isInstalled() || location.protocol === 'file:') return showInstall(false);
+  if (/iPad|iPhone|iPod/.test(navigator.userAgent)) return showInstall(true);
+  setTimeout(() => { if (!installEvent && !isInstalled()) showInstall(true); }, 2500);
+}
+primeInstall();
+
+/* ============ boot ============ */
+const BUILD = 33;
+/* The toolbar's height was hard-coded at 3.1rem. It is not: it grows when the
+   font scales, and shrinks on a narrow phone. Everything pinned beneath it
+   drifted. Now it is measured and published as --bar-h. */
+function measureBar(){
+  const bar = document.querySelector('.bar');
+  if (!bar) return;
+  const h = Math.round(bar.getBoundingClientRect().height);
+  if (h > 0) document.documentElement.style.setProperty('--bar-h', h + 'px');
+}
+/* The stamp shows which layout is live, not only which build. Half of this
+   project's confusion was a phone fix judged on a desktop screen, where it is
+   meant to be invisible. */
+function stampNow(){
+  const el = $('stamp'); if (!el) return;
+  const w = window.innerWidth || 0;
+  const mode = w <= 420 ? 'هاتف ضيّق'
+             : w <= 900 ? 'هاتف'
+             : w <= 1100 ? 'لوحي' : 'حاسوب';
+  el.textContent = `${AR(BUILD)} · ${mode} · ${AR(w)}px`;
+}
+stampNow();
+window.addEventListener('resize', stampNow, { passive: true });
+window.addEventListener('orientationchange', () => setTimeout(stampNow, 220));
+
+measureBar();
+try {
+  if (window.ResizeObserver) new ResizeObserver(measureBar).observe(document.querySelector('.bar'));
+} catch(e){}
+window.addEventListener('resize', measureBar, { passive: true });
+window.addEventListener('orientationchange', () => setTimeout(measureBar, 220));
+
+setType(); loadLex(); renderMargin(); renderShelf();
+console.log('%cالحاشية — نسخة ' + BUILD, 'font-weight:700');
+cfgReady.then(() => {
+  showKeyState();
+  if (!CFG.key) setTimeout(() => { if (!CFG.key) { showKeyState(); $('modal').hidden = false; } }, 900);
+});
+/* On a phone, file:// means no service worker and, on Chrome for Android, no
+   IndexedDB either: the reader would silently forget every book and the key. */
+if (location.protocol === 'file:')
+  banner('<b>تعمل الآن من ملف على القرص.</b> '
+       + '<u>يعمل:</u> فتح PDF والقراءة والبحث والفهرس وتكبير الخط والنطق الصوتي. '
+       + '<u>لا يعمل:</u> تثبيت التطبيق على الشاشة الرئيسية، والعمل دون اتصال، '
+       + 'وحفظ الكتب والمعجم والمفتاح بعد إغلاق المتصفح — لأن أندرويد يمنع التخزين على ملفات القرص. '
+       + '<b>صدّر معجمك قبل الإغلاق.</b>', 'bad');
+
+if (!PDFJS) banner('<b>مكتبة قراءة PDF لم تُحمّل</b> — يجلبها التطبيق من الإنترنت أول مرة فقط. '
+  + 'اتصل بالشبكة وأعد تحميل الصفحة. بقية التطبيق يعمل: الإعدادات، المعجم، وملفات <code>.txt</code>.', 'bad');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+askPersist();
+</script>
+</body>
+</html>

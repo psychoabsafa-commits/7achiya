@@ -1,0 +1,77 @@
+{
+  "name": "الحاشية — قارئ الكتب",
+  "short_name": "الحاشية",
+  "description": "قارئ PDF بحاشية سياقية: نطق المصطلح بالبريطانية أو الفرنسية، وأصله الاشتقاقي، ومعناه في فقرته.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#E9EBEC",
+  "theme_color": "#161F2A",
+  "categories": [
+    "books",
+    "education",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./index.html",
+      "accept": {
+        "application/pdf": [
+          ".pdf"
+        ]
+      }
+    }
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "id": "./",
+  "shortcuts": [
+    {
+      "name": "افتح كتاباً",
+      "short_name": "افتح",
+      "url": "./index.html?a=open",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "معجمي",
+      "short_name": "المعجم",
+      "url": "./index.html?a=lex",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
