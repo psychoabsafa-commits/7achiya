@@ -1,4 +1,4 @@
-const CACHE = 'hashiya-v33';
+const CACHE = 'hashiya-v36';
 
 /* Everything the app needs to open with no network at all. The pdf.js pair is
    remote, so it is cached on the very first visit — after that the reader
